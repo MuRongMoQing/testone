@@ -1,0 +1,194 @@
+:root {
+  color-scheme: light;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: #f5f7fb;
+  color: #172033;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 16px;
+  background: #1f6feb;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+button.secondary {
+  background: #dce3ef;
+  color: #172033;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #ccd6e3;
+  border-radius: 6px;
+  padding: 9px 11px;
+  background: #fff;
+}
+
+.app {
+  width: min(1180px, calc(100vw - 32px));
+  margin: 32px auto;
+}
+
+.login,
+.dashboard {
+  background: #fff;
+  border: 1px solid #dce3ef;
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(28, 39, 60, .08);
+}
+
+.login {
+  width: min(420px, 100%);
+  margin: 12vh auto 0;
+  padding: 28px;
+}
+
+.login h1,
+.topbar h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.login label {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  color: #536176;
+}
+
+.login button {
+  width: 100%;
+  margin-top: 22px;
+}
+
+.hint,
+.topbar p,
+.message {
+  color: #6b778c;
+}
+
+.dashboard {
+  padding: 24px;
+}
+
+.topbar,
+.toolbar,
+.editor {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+}
+
+.topbar {
+  grid-template-columns: 1fr auto;
+  margin-bottom: 20px;
+}
+
+.toolbar {
+  grid-template-columns: minmax(180px, 1fr) 180px auto;
+  margin-bottom: 12px;
+}
+
+.editor {
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 220px) auto;
+  margin-bottom: 12px;
+}
+
+.message {
+  min-height: 24px;
+}
+
+.message.error {
+  color: #b42318;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid #dce3ef;
+  border-radius: 8px;
+}
+
+table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 12px;
+  border-bottom: 1px solid #e7edf5;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  background: #f0f4fa;
+  color: #4d5b70;
+  font-weight: 600;
+}
+
+tr:last-child td {
+  border-bottom: 0;
+}
+
+.badge {
+  display: inline-block;
+  min-width: 58px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  text-align: center;
+  background: #e8f5ee;
+  color: #16794c;
+}
+
+.badge.taken {
+  background: #eef1f6;
+  color: #667085;
+}
+
+.hidden {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .app {
+    width: min(100vw - 20px, 1180px);
+    margin-top: 10px;
+  }
+
+  .dashboard,
+  .login {
+    padding: 18px;
+  }
+
+  .topbar,
+  .toolbar,
+  .editor {
+    grid-template-columns: 1fr;
+  }
+}

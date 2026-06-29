@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>仓储存取系统</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="app">
+    <section class="login" id="loginPanel">
+      <h1>仓储存取系统</h1>
+      <label>账号<input id="username" autocomplete="username" value="admin"></label>
+      <label>密码<input id="password" type="password" autocomplete="current-password" value="admin123"></label>
+      <button id="loginBtn">登录</button>
+      <p class="hint">内置账号：admin/admin123、manager/manager123、viewer/viewer123</p>
+    </section>
+
+    <section class="dashboard hidden" id="dashboard">
+      <header class="topbar">
+        <div>
+          <h1>货物管理</h1>
+          <p id="userInfo"></p>
+        </div>
+        <button id="logoutBtn" class="secondary">退出</button>
+      </header>
+
+      <section class="toolbar">
+        <input id="searchName" placeholder="按货物名查询">
+        <select id="statusFilter">
+          <option value="">全部状态</option>
+          <option value="stored">在库</option>
+          <option value="taken">已取出</option>
+        </select>
+        <button id="searchBtn">查询</button>
+      </section>
+
+      <section class="editor" id="editorPanel">
+        <input id="goodsName" placeholder="新货物名称">
+        <input id="goodsLocation" placeholder="货位，例如 A-01">
+        <button id="storeBtn">入库</button>
+      </section>
+
+      <p id="message" class="message"></p>
+
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>货物名</th>
+              <th>货位</th>
+              <th>状态</th>
+              <th>入库时间</th>
+              <th>取出时间</th>
+              <th>操作员</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="goodsRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
