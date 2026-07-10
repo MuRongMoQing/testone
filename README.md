@@ -42,7 +42,7 @@ g++ -std=c++17 src/main.cpp -pthread -o warehouse_server
 启动后访问：
 
 ```text
-http://localhost:8080
+http://localhost:8081
 ```
 
 数据会保存到运行目录下的 `warehouse_data.tsv`。

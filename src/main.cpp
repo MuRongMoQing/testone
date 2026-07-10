@@ -32,7 +32,7 @@ using Socket = int;
 
 namespace {
 
-const int kPort = 8080;
+const int kPort = 8081;
 const int kVacancyRetentionDays = 30;
 const char* kDataFile = "warehouse_data.tsv";
 
@@ -585,7 +585,7 @@ int main() {
 
     sockaddr_in address{};
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_addr.s_addr = inet_addr("127.0.0.1");
     address.sin_port = htons(kPort);
 
     if (bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
