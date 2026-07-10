@@ -565,7 +565,7 @@ void cleanupSockets() {
 
 } // namespace
 
-int main() {
+[[noreturn]] int main() {
     if (!initializeSockets()) {
         std::cerr << "Socket initialization failed\n";
         return 1;
