@@ -30,9 +30,8 @@ using Socket = int;
 #endif
 
 namespace {
-
-const int kPort = 8081;
-const int kVacancyRetentionDays = 30;
+    constexpr int kPort = 8081;
+constexpr int kVacancyRetentionDays = 30;
 const char* kDataFile = "warehouse_data.tsv";
 
 struct User {
