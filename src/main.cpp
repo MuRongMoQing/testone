@@ -15,7 +15,9 @@
 #include <vector>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
 using Socket = SOCKET;
@@ -29,10 +31,11 @@ using Socket = int;
 #define SOCKET_ERROR (-1)
 #endif
 
+#include <mysql.h>
+
 namespace {
     constexpr int kPort = 8081;
 constexpr int kVacancyRetentionDays = 30;
-const char* kDataFile = "warehouse_data.tsv";
 
 struct User {
     std::string username;
@@ -58,14 +61,9 @@ struct Request {
     std::string body;
 };
 
-std::mutex g_mutex;
-std::vector<Goods> g_goods;
-std::map<std::string, User> g_users = {
-    {"admin", {"admin", "admin123", "admin"}},
-    {"manager", {"manager", "manager123", "manager"}},
-    {"viewer", {"viewer", "viewer123", "viewer"}},
-};
-std::map<std::string, User> g_sessions;
+std::mutex g_dbMutex;                    // protects DB calls AND g_sessions
+MYSQL* g_db = nullptr;                   // MySQL connection handle
+std::map<std::string, User> g_sessions;  // in-memory sessions (unchanged)
 std::atomic<int> g_tokenSeed{1000};
 
 void closeSocket(Socket socket) {
@@ -192,68 +190,80 @@ std::map<std::string, std::string> parseQuery(const std::string& query) {
     return params;
 }
 
-std::vector<std::string> splitTsv(const std::string& line) {
-    std::vector<std::string> parts;
-    std::stringstream stream(line);
-    std::string part;
-    while (std::getline(stream, part, '\t')) {
-        parts.push_back(part);
-    }
-    return parts;
+// â”€â”€ MySQL helpers â”€â”€
+
+std::string dbEscape(const std::string& s) {
+    if (!g_db) return s;
+    std::vector<char> buf(s.size() * 2 + 1);
+    mysql_real_escape_string(g_db, buf.data(), s.c_str(), static_cast<unsigned long>(s.size()));
+    return std::string(buf.data());
 }
 
-void saveData() {
-    std::ofstream file(kDataFile, std::ios::trunc);
-    for (const auto& item : g_goods) {
-        file << item.id << '\t'
-             << item.name << '\t'
-             << item.location << '\t'
-             << item.status << '\t'
-             << item.storedAt << '\t'
-             << item.takenAt << '\t'
-             << item.operatorName << '\n';
-    }
+std::time_t dbTimeToTimeT(const std::string& datetime) {
+    std::tm tm = {};
+    std::istringstream ss(datetime);
+    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
+    if (ss.fail()) return 0;
+    return std::mktime(&tm);
 }
 
-void loadData() {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    std::ifstream file(kDataFile);
-    std::string line;
-    while (std::getline(file, line)) {
-        auto parts = splitTsv(line);
-        if (parts.size() < 7) {
-            continue;
-        }
-        Goods item;
-        item.id = std::stoi(parts[0]);
-        item.name = parts[1];
-        item.location = parts[2];
-        item.status = parts[3];
-        item.storedAt = static_cast<std::time_t>(std::stoll(parts[4]));
-        item.takenAt = static_cast<std::time_t>(std::stoll(parts[5]));
-        item.operatorName = parts[6];
-        g_goods.push_back(item);
+// â”€â”€ DB lifecycle â”€â”€
+
+bool initDb() {
+    g_db = mysql_init(nullptr);
+    if (!g_db) return false;
+
+    if (!mysql_real_connect(g_db, "localhost", "root", "JBY@ll370079", "first_test",
+                            3306, nullptr, 0)) {
+        std::cerr << "MySQL connect error: " << mysql_error(g_db) << "\n";
+        return false;
     }
+
+    const char* createUsers =
+        "CREATE TABLE IF NOT EXISTS users ("
+        "  id INT AUTO_INCREMENT PRIMARY KEY,"
+        "  username VARCHAR(64) NOT NULL UNIQUE,"
+        "  password VARCHAR(128) NOT NULL,"
+        "  role VARCHAR(32) NOT NULL DEFAULT 'viewer'"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+
+    const char* createGoods =
+        "CREATE TABLE IF NOT EXISTS goods ("
+        "  id INT AUTO_INCREMENT PRIMARY KEY,"
+        "  name VARCHAR(256) NOT NULL,"
+        "  location VARCHAR(256) NOT NULL DEFAULT 'é»˜è®¤è´§æ¶',"
+        "  status VARCHAR(32) NOT NULL DEFAULT 'stored',"
+        "  stored_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  taken_at DATETIME NULL,"
+        "  operator VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+
+    if (mysql_query(g_db, createUsers) != 0 ||
+        mysql_query(g_db, createGoods) != 0) {
+        std::cerr << "MySQL create table error: " << mysql_error(g_db) << "\n";
+        return false;
+    }
+
+    const char* seedAdmin    = "INSERT IGNORE INTO users (username,password,role) VALUES ('admin','admin123','admin')";
+    const char* seedManager  = "INSERT IGNORE INTO users (username,password,role) VALUES ('manager','manager123','manager')";
+    const char* seedViewer   = "INSERT IGNORE INTO users (username,password,role) VALUES ('viewer','viewer123','viewer')";
+
+    if (mysql_query(g_db, seedAdmin) != 0 ||
+        mysql_query(g_db, seedManager) != 0 ||
+        mysql_query(g_db, seedViewer) != 0) {
+        std::cerr << "MySQL seed error: " << mysql_error(g_db) << "\n";
+        return false;
+    }
+
+    std::cout << "MySQL connected, tables ready.\n";
+    return true;
 }
 
-void cleanupExpiredVacanciesLocked() {
-    const std::time_t now = std::time(nullptr);
-    constexpr std::time_t maxAge = static_cast<std::time_t>(kVacancyRetentionDays) * 24 * 60 * 60;
-    const auto oldSize = g_goods.size();
-    g_goods.erase(std::remove_if(g_goods.begin(), g_goods.end(), [&](const Goods& item) {
-        return item.status == "taken" && item.takenAt > 0 && now - item.takenAt > maxAge;
-    }), g_goods.end());
-    if (g_goods.size() != oldSize) {
-        saveData();
+void closeDb() {
+    if (g_db) {
+        mysql_close(g_db);
+        g_db = nullptr;
     }
-}
-
-int nextGoodsIdLocked() {
-    int maxId = 0;
-    for (const auto& item : g_goods) {
-        maxId = std::max(maxId, item.id);
-    }
-    return maxId + 1;
 }
 
 bool roleAtLeast(const User& user, const std::string& required) {
@@ -275,7 +285,7 @@ bool getAuthenticatedUser(const Request& req, User& user) {
         return false;
     }
     std::string token = it->second.substr(prefix.size());
-    std::lock_guard<std::mutex> lock(g_mutex);
+    std::lock_guard<std::mutex> lock(g_dbMutex);
     auto session = g_sessions.find(token);
     if (session == g_sessions.end()) {
         return false;
@@ -329,42 +339,88 @@ std::string errorResponse(int status, const std::string& message) {
 std::string handleLogin(const Request& req) {
     std::string username = getJsonString(req.body, "username");
     std::string password = getJsonString(req.body, "password");
-    std::lock_guard<std::mutex> lock(g_mutex);
-    auto it = g_users.find(username);
-    if (it == g_users.end() || it->second.password != password) {
-        return errorResponse(401, "ÓÃ»§Ãû»òÃÜÂë´íÎó");
+    if (username.empty() || password.empty()) {
+        return errorResponse(400, "ç”¨æˆ·åå’Œå¯†ç ä¸èƒ½ä¸ºç©º");
     }
-    std::string token = username + "-" + std::to_string(std::time(nullptr)) + "-" + std::to_string(g_tokenSeed++);
-    g_sessions[token] = it->second;
-    return jsonResponse(200, "{\"token\":" + jsonString(token) + ",\"role\":" + jsonString(it->second.role) + ",\"username\":" + jsonString(username) + "}");
+    std::lock_guard<std::mutex> lock(g_dbMutex);
+    std::string sql = "SELECT username, password, role FROM users WHERE username='"
+        + dbEscape(username) + "'";
+    if (mysql_query(g_db, sql.c_str()) != 0) {
+        return errorResponse(500, "æ•°æ®åº“æŸ¥è¯¢å¤±è´¥");
+    }
+    MYSQL_RES* result = mysql_store_result(g_db);
+    if (!result) {
+        return errorResponse(500, "æ•°æ®åº“æŸ¥è¯¢å¤±è´¥");
+    }
+    MYSQL_ROW row = mysql_fetch_row(result);
+    if (!row || std::string(row[1]) != password) {
+        mysql_free_result(result);
+        return errorResponse(401, "ç”¨æˆ·åæˆ–å¯†ç é”™è¯¯");
+    }
+    std::string dbUser = row[0];
+    std::string dbRole = row[2];
+    mysql_free_result(result);
+    std::string token = username + "-" + std::to_string(std::time(nullptr))
+        + "-" + std::to_string(g_tokenSeed++);
+    g_sessions[token] = {dbUser, password, dbRole};
+    return jsonResponse(200,
+        "{\"token\":" + jsonString(token)
+        + ",\"role\":" + jsonString(dbRole)
+        + ",\"username\":" + jsonString(username) + "}");
 }
 
 std::string handleListGoods(const Request& req) {
     User user;
     if (!getAuthenticatedUser(req, user)) {
-        return errorResponse(401, "ÇëÏÈµÇÂ¼");
+        return errorResponse(401, "è¯·å…ˆç™»å½•");
     }
     auto params = parseQuery(req.query);
     std::string name = lower(params["name"]);
     std::string status = params["status"];
-    std::lock_guard<std::mutex> lock(g_mutex);
-    cleanupExpiredVacanciesLocked();
+    std::lock_guard<std::mutex> lock(g_dbMutex);
+
+    // Cleanup expired taken records
+    mysql_query(g_db,
+        "DELETE FROM goods WHERE status='taken' AND taken_at IS NOT NULL"
+        " AND taken_at < NOW() - INTERVAL 30 DAY");
+
+    // Build SELECT
+    std::string sql =
+        "SELECT id, name, location, status, stored_at, taken_at, operator"
+        " FROM goods WHERE 1=1";
+    if (!name.empty()) {
+        sql += " AND LOWER(name) LIKE '%" + dbEscape(name) + "%'";
+    }
+    if (!status.empty()) {
+        sql += " AND status='" + dbEscape(status) + "'";
+    }
+    sql += " ORDER BY id";
+
+    if (mysql_query(g_db, sql.c_str()) != 0) {
+        return errorResponse(500, "æ•°æ®åº“æŸ¥è¯¢å¤±è´¥");
+    }
+    MYSQL_RES* result = mysql_store_result(g_db);
+    if (!result) {
+        return errorResponse(500, "æ•°æ®åº“æŸ¥è¯¢å¤±è´¥");
+    }
     std::ostringstream out;
     out << "{\"items\":[";
     bool first = true;
-    for (const auto& item : g_goods) {
-        if (!name.empty() && lower(item.name).find(name) == std::string::npos) {
-            continue;
-        }
-        if (!status.empty() && item.status != status) {
-            continue;
-        }
-        if (!first) {
-            out << ",";
-        }
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(result))) {
+        Goods item;
+        item.id = row[0] ? std::stoi(row[0]) : 0;
+        item.name = row[1] ? row[1] : "";
+        item.location = row[2] ? row[2] : "";
+        item.status = row[3] ? row[3] : "";
+        item.storedAt = (row[4] && row[4][0]) ? dbTimeToTimeT(row[4]) : 0;
+        item.takenAt = (row[5] && row[5][0]) ? dbTimeToTimeT(row[5]) : 0;
+        item.operatorName = row[6] ? row[6] : "";
+        if (!first) out << ",";
         first = false;
         out << goodsToJson(item);
     }
+    mysql_free_result(result);
     out << "]}";
     return jsonResponse(200, out.str());
 }
@@ -372,58 +428,120 @@ std::string handleListGoods(const Request& req) {
 std::string handleCreateGoods(const Request& req) {
     User user;
     if (!getAuthenticatedUser(req, user)) {
-        return errorResponse(401, "ÇëÏÈµÇÂ¼");
+        return errorResponse(401, "è¯·å…ˆç™»å½•");
     }
     if (!roleAtLeast(user, "manager")) {
-        return errorResponse(403, "µ±Ç°ÓÃ»§ÎŞÈë¿âÈ¨ÏŞ");
+        return errorResponse(403, "å½“å‰ç”¨æˆ·æ— æ­¤æƒé™");
     }
     std::string name = normalizeField(getJsonString(req.body, "name"));
     std::string location = normalizeField(getJsonString(req.body, "location"));
     if (name.empty()) {
-        return errorResponse(400, "»õÎïÃû²»ÄÜÎª¿Õ");
+        return errorResponse(400, "è´§ç‰©åç§°ä¸èƒ½ä¸ºç©º");
     }
-    std::lock_guard<std::mutex> lock(g_mutex);
-    cleanupExpiredVacanciesLocked();
+    if (location.empty()) {
+        location = "é»˜è®¤è´§æ¶";
+    }
+    std::lock_guard<std::mutex> lock(g_dbMutex);
+    // Cleanup expired
+    mysql_query(g_db,
+        "DELETE FROM goods WHERE status='taken' AND taken_at IS NOT NULL"
+        " AND taken_at < NOW() - INTERVAL 30 DAY");
+    // INSERT
+    std::string sql = "INSERT INTO goods (name, location, status, stored_at, operator)"
+        " VALUES ('" + dbEscape(name) + "','"
+        + dbEscape(location) + "','stored',NOW(),'"
+        + dbEscape(user.username) + "')";
+    if (mysql_query(g_db, sql.c_str()) != 0) {
+        return errorResponse(500, "å…¥åº“å¤±è´¥");
+    }
+    int newId = static_cast<int>(mysql_insert_id(g_db));
+    // Read back full row
+    std::string sel = "SELECT id, name, location, status, stored_at, taken_at, operator"
+        " FROM goods WHERE id=" + std::to_string(newId);
+    mysql_query(g_db, sel.c_str());
+    MYSQL_RES* result = mysql_store_result(g_db);
     Goods item;
-    item.id = nextGoodsIdLocked();
-    item.name = name;
-    item.location = location.empty() ? "Ä¬ÈÏ»õ¼Ü" : location;
-    item.status = "stored";
-    item.storedAt = std::time(nullptr);
-    item.operatorName = user.username;
-    g_goods.push_back(item);
-    saveData();
+    if (result) {
+        MYSQL_ROW row = mysql_fetch_row(result);
+        if (row) {
+            item.id = row[0] ? std::stoi(row[0]) : 0;
+            item.name = row[1] ? row[1] : "";
+            item.location = row[2] ? row[2] : "";
+            item.status = row[3] ? row[3] : "";
+            item.storedAt = (row[4] && row[4][0]) ? dbTimeToTimeT(row[4]) : 0;
+            item.operatorName = row[6] ? row[6] : "";
+        }
+        mysql_free_result(result);
+    }
     return jsonResponse(201, "{\"item\":" + goodsToJson(item) + "}");
 }
 
 std::string handleTakeGoods(const Request& req) {
     User user;
     if (!getAuthenticatedUser(req, user)) {
-        return errorResponse(401, "ÇëÏÈµÇÂ¼");
+        return errorResponse(401, "è¯·å…ˆç™»å½•");
     }
     if (!roleAtLeast(user, "manager")) {
-        return errorResponse(403, "µ±Ç°ÓÃ»§ÎŞÈ¡³öÈ¨ÏŞ");
+        return errorResponse(403, "å½“å‰ç”¨æˆ·æ— å–å‡ºæƒé™");
     }
     std::string idText = getJsonString(req.body, "id");
     if (idText.rfind("G", 0) == 0 || idText.rfind("g", 0) == 0) {
         idText = idText.substr(1);
     }
     int id = std::atoi(idText.c_str());
-    std::lock_guard<std::mutex> lock(g_mutex);
-    cleanupExpiredVacanciesLocked();
-    for (auto& item : g_goods) {
-        if (item.id == id) {
-            if (item.status == "taken") {
-                return errorResponse(400, "¸Ã»õÎïÒÑÈ¡³ö");
-            }
-            item.status = "taken";
-            item.takenAt = std::time(nullptr);
-            item.operatorName = user.username;
-            saveData();
-            return jsonResponse(200, "{\"item\":" + goodsToJson(item) + "}");
-        }
+    if (id <= 0) {
+        return errorResponse(400, "æ— æ•ˆçš„è´§ç‰©ç¼–å·");
     }
-    return errorResponse(404, "Î´ÕÒµ½¸Ã»õÎï");
+    std::lock_guard<std::mutex> lock(g_dbMutex);
+    // Cleanup expired
+    mysql_query(g_db,
+        "DELETE FROM goods WHERE status='taken' AND taken_at IS NOT NULL"
+        " AND taken_at < NOW() - INTERVAL 30 DAY");
+    // Check status
+    std::string checkSql = "SELECT status FROM goods WHERE id=" + std::to_string(id);
+    if (mysql_query(g_db, checkSql.c_str()) != 0) {
+        return errorResponse(500, "æ•°æ®åº“æŸ¥è¯¢å¤±è´¥");
+    }
+    MYSQL_RES* result = mysql_store_result(g_db);
+    if (!result) {
+        return errorResponse(500, "æ•°æ®åº“æŸ¥è¯¢å¤±è´¥");
+    }
+    MYSQL_ROW row = mysql_fetch_row(result);
+    if (!row) {
+        mysql_free_result(result);
+        return errorResponse(404, "æœªæ‰¾åˆ°è¯¥è´§ç‰©");
+    }
+    std::string currentStatus = row[0] ? row[0] : "";
+    mysql_free_result(result);
+    if (currentStatus == "taken") {
+        return errorResponse(400, "è¯¥è´§ç‰©å·²å–å‡º");
+    }
+    // Update
+    std::string upd = "UPDATE goods SET status='taken', taken_at=NOW(), operator='"
+        + dbEscape(user.username) + "' WHERE id=" + std::to_string(id);
+    if (mysql_query(g_db, upd.c_str()) != 0) {
+        return errorResponse(500, "å–å‡ºå¤±è´¥");
+    }
+    // Read back for response
+    std::string sel = "SELECT id, name, location, status, stored_at, taken_at, operator"
+        " FROM goods WHERE id=" + std::to_string(id);
+    mysql_query(g_db, sel.c_str());
+    result = mysql_store_result(g_db);
+    Goods item;
+    if (result) {
+        row = mysql_fetch_row(result);
+        if (row) {
+            item.id = row[0] ? std::stoi(row[0]) : 0;
+            item.name = row[1] ? row[1] : "";
+            item.location = row[2] ? row[2] : "";
+            item.status = row[3] ? row[3] : "";
+            item.storedAt = (row[4] && row[4][0]) ? dbTimeToTimeT(row[4]) : 0;
+            item.takenAt = (row[5] && row[5][0]) ? dbTimeToTimeT(row[5]) : 0;
+            item.operatorName = row[6] ? row[6] : "";
+        }
+        mysql_free_result(result);
+    }
+    return jsonResponse(200, "{\"item\":" + goodsToJson(item) + "}");
 }
 
 std::string mimeType(const std::string& path) {
@@ -446,12 +564,12 @@ std::string readFile(const std::string& path) {
 std::string serveStatic(const Request& req) {
     std::string path = req.path == "/" ? "/index.html" : req.path;
     if (path.find("..") != std::string::npos) {
-        return errorResponse(404, "×ÊÔ´²»´æÔÚ");
+        return errorResponse(404, "ï¿½ï¿½Ô´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½");
     }
     std::string filePath = "public" + path;
     std::string content = readFile(filePath);
     if (content.empty()) {
-        return errorResponse(404, "×ÊÔ´²»´æÔÚ");
+        return errorResponse(404, "ï¿½ï¿½Ô´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½");
     }
     return response(200, mimeType(filePath), content);
 }
@@ -473,10 +591,10 @@ std::string handleRequest(const Request& req) {
         return handleTakeGoods(req);
     }
     if (req.path.rfind("/api/", 0) == 0) {
-        return errorResponse(404, "½Ó¿Ú²»´æÔÚ");
+        return errorResponse(404, "ï¿½Ó¿Ú²ï¿½ï¿½ï¿½ï¿½ï¿½");
     }
     if (req.method != "GET") {
-        return errorResponse(405, "·½·¨²»Ö§³Ö");
+        return errorResponse(405, "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö§ï¿½ï¿½");
     }
     return serveStatic(req);
 }
@@ -542,7 +660,7 @@ void handleClient(Socket client) {
     Request req;
     std::string output = parseRequest(raw, req)
         ? handleRequest(req)
-        : errorResponse(400, "ÇëÇó¸ñÊ½´íÎó");
+        : errorResponse(400, "ï¿½ï¿½ï¿½ï¿½ï¿½Ê½ï¿½ï¿½ï¿½ï¿½");
     send(client, output.c_str(), static_cast<int>(output.size()), 0);
     closeSocket(client);
 }
@@ -569,11 +687,16 @@ int main() {
         std::cerr << "Socket initialization failed\n";
         return 1;
     }
-    loadData();
+    if (!initDb()) {
+        std::cerr << "Database initialization failed\n";
+        cleanupSockets();
+        return 1;
+    }
 
     Socket server = socket(AF_INET, SOCK_STREAM, 0);
     if (server == INVALID_SOCKET) {
         std::cerr << "Cannot create socket\n";
+        closeDb();
         cleanupSockets();
         return 1;
     }
@@ -588,12 +711,14 @@ int main() {
 
     if (bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
         std::cerr << "Cannot bind port " << kPort << "\n";
+        closeDb();
         closeSocket(server);
         cleanupSockets();
         return 1;
     }
     if (listen(server, 16) == SOCKET_ERROR) {
         std::cerr << "Cannot listen on port " << kPort << "\n";
+        closeDb();
         closeSocket(server);
         cleanupSockets();
         return 1;
