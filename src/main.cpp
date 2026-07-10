@@ -30,9 +30,8 @@ using Socket = int;
 #endif
 
 namespace {
-
-const int kPort = 8081;
-const int kVacancyRetentionDays = 30;
+    constexpr int kPort = 8081;
+constexpr int kVacancyRetentionDays = 30;
 const char* kDataFile = "warehouse_data.tsv";
 
 struct User {
@@ -239,7 +238,7 @@ void loadData() {
 
 void cleanupExpiredVacanciesLocked() {
     const std::time_t now = std::time(nullptr);
-    const std::time_t maxAge = static_cast<std::time_t>(kVacancyRetentionDays) * 24 * 60 * 60;
+    constexpr std::time_t maxAge = static_cast<std::time_t>(kVacancyRetentionDays) * 24 * 60 * 60;
     const auto oldSize = g_goods.size();
     g_goods.erase(std::remove_if(g_goods.begin(), g_goods.end(), [&](const Goods& item) {
         return item.status == "taken" && item.takenAt > 0 && now - item.takenAt > maxAge;
