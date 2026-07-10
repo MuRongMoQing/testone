@@ -287,7 +287,7 @@ bool getAuthenticatedUser(const Request& req, User& user) {
 std::string goodsToJson(const Goods& item) {
     std::ostringstream out;
     out << "{"
-        << "\"id\":\"G" << std::setw(6) << std::setfill('0') << item.id << "\","
+        << R"("id":"G)" << std::setw(6) << std::setfill('0') << item.id << "\","
         << "\"name\":" << jsonString(item.name) << ","
         << "\"location\":" << jsonString(item.location) << ","
         << "\"status\":" << jsonString(item.status) << ","
