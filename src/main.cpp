@@ -199,11 +199,26 @@ std::string dbEscape(const std::string& s) {
     return std::string(buf.data());
 }
 
-std::time_t dbTimeToTimeT(const std::string& datetime) {
+    std::time_t dbTimeToTimeT(const std::string& datetime) {
     std::tm tm = {};
-    std::istringstream ss(datetime);
-    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
-    if (ss.fail()) return 0;
+    int year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
+#ifdef _WIN32
+    if (sscanf_s(datetime.c_str(), "%d-%d-%d %d:%d:%d",
+                 &year, &month, &day, &hour, &min, &sec) != 6) {
+        return 0;
+                 }
+#else
+    if (std::sscanf(datetime.c_str(), "%d-%d-%d %d:%d:%d",
+                    &year, &month, &day, &hour, &min, &sec) != 6) {
+        return 0;
+                    }
+#endif
+    tm.tm_year = year - 1900;
+    tm.tm_mon  = month - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min  = min;
+    tm.tm_sec  = sec;
     return std::mktime(&tm);
 }
 
