@@ -18,14 +18,26 @@ target_link_libraries(warehouse_server PRIVATE Threads::Threads)
 # ===============================
 if(WIN32)
 
-    # 如果使用 vcpkg
-    find_package(unofficial-libmysql REQUIRED)
+    find_package(unofficial-libmysql CONFIG REQUIRED)
 
-    target_link_libraries(warehouse_server PRIVATE
+    get_target_property(
+        MYSQL_INCLUDE_DIR
+        unofficial::libmysql::libmysql
+        INTERFACE_INCLUDE_DIRECTORIES
+    )
+
+    target_include_directories(
+        warehouse_server PRIVATE
+        ${MYSQL_INCLUDE_DIR}
+    )
+
+    target_link_libraries(
+        warehouse_server PRIVATE
         unofficial::libmysql::libmysql
         ws2_32
     )
 
+endif()
 # ===============================
 # Linux
 # ===============================
