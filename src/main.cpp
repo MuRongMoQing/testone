@@ -13,6 +13,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <mysql.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
