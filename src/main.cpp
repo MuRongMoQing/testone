@@ -203,11 +203,26 @@ std::string dbEscape(const std::string& s) {
     return std::string(buf.data());
 }
 
-std::time_t dbTimeToTimeT(const std::string& datetime) {
+    std::time_t dbTimeToTimeT(const std::string& datetime) {
     std::tm tm = {};
-    std::istringstream ss(datetime);
-    ss >> std::get_time(&tm, "%Y-%m-%d %H:%M:%S");
-    if (ss.fail()) return 0;
+    int year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
+#ifdef _WIN32
+    if (sscanf_s(datetime.c_str(), "%d-%d-%d %d:%d:%d",
+                 &year, &month, &day, &hour, &min, &sec) != 6) {
+        return 0;
+                 }
+#else
+    if (std::sscanf(datetime.c_str(), "%d-%d-%d %d:%d:%d",
+                    &year, &month, &day, &hour, &min, &sec) != 6) {
+        return 0;
+                    }
+#endif
+    tm.tm_year = year - 1900;
+    tm.tm_mon  = month - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min  = min;
+    tm.tm_sec  = sec;
     return std::mktime(&tm);
 }
 
@@ -568,12 +583,12 @@ std::string readFile(const std::string& path) {
 std::string serveStatic(const Request& req) {
     std::string path = req.path == "/" ? "/index.html" : req.path;
     if (path.find("..") != std::string::npos) {
-        return errorResponse(404, "��Դ������");
+        return errorResponse(404, "资源不存在");
     }
     std::string filePath = "public" + path;
     std::string content = readFile(filePath);
     if (content.empty()) {
-        return errorResponse(404, "��Դ������");
+        return errorResponse(404, "资源不存在");
     }
     return response(200, mimeType(filePath), content);
 }
@@ -595,10 +610,10 @@ std::string handleRequest(const Request& req) {
         return handleTakeGoods(req);
     }
     if (req.path.rfind("/api/", 0) == 0) {
-        return errorResponse(404, "�ӿڲ�����");
+        return errorResponse(404, "接口不存在");
     }
     if (req.method != "GET") {
-        return errorResponse(405, "������֧��");
+        return errorResponse(405, "方法不支持");
     }
     return serveStatic(req);
 }
@@ -664,7 +679,7 @@ void handleClient(Socket client) {
     Request req;
     std::string output = parseRequest(raw, req)
         ? handleRequest(req)
-        : errorResponse(400, "�����ʽ����");
+        : errorResponse(400, "请求格式错误");
     send(client, output.c_str(), static_cast<int>(output.size()), 0);
     closeSocket(client);
 }
