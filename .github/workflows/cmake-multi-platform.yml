@@ -2,9 +2,11 @@ name: CMake on multiple platforms
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches:
+      - master
+      - main
+
   pull_request:
-    branches: [ "master" ]
 
 jobs:
 
@@ -33,65 +35,84 @@ jobs:
 
     steps:
 
-    - uses: actions/checkout@v4
+      ###################################################
+      # Checkout
+      ###################################################
 
-    ####################################################
-    # Ubuntu
-    ####################################################
+      - uses: actions/checkout@v4
 
-    - name: Install Linux dependencies
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          default-libmysqlclient-dev \
-          pkg-config
+      ###################################################
+      # Linux dependencies
+      ###################################################
 
-    ####################################################
-    # Windows
-    ####################################################
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            default-libmysqlclient-dev \
+            pkg-config
 
-    - name: Install MySQL via vcpkg
-      if: runner.os == 'Windows'
-      run: |
-        git clone https://github.com/microsoft/vcpkg.git
-        ./vcpkg/bootstrap-vcpkg.bat
-        ./vcpkg/vcpkg install libmysql:x64-windows
+      ###################################################
+      # Setup compiler (Linux)
+      ###################################################
 
-    - name: Show installed packages
-     if: runner.os == 'Windows'
-     run: |
-        dir vcpkg\installed\x64-windows\share
+      - name: Set compiler
+        if: runner.os == 'Linux'
+        run: |
+          echo "CC={{ matrix.cc }}" >> {{ matrix.cc }}" >> GITHUB_ENV
+          echo "CXX={{ matrix.cxx }}" >> {{ matrix.cxx }}" >> GITHUB_ENV
 
-    ####################################################
-    # Configure
-    ####################################################
+      ###################################################
+      # Setup vcpkg (Windows)
+      ###################################################
 
-    - name: Configure
-      env:
-        CC: ${{ matrix.cc }}
-        CXX: ${{ matrix.cxx }}
-      run: |
-        if [ "${{ runner.os }}" = "Windows" ]; then
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE=vcpkg/scripts/buildsystems/vcpkg.cmake
-        else
-          cmake -B build \
+      - name: Setup vcpkg
+        if: runner.os == 'Windows'
+        uses: lukka/run-vcpkg@v11
+
+      ###################################################
+      # Install MySQL (Windows)
+      ###################################################
+
+      - name: Install MySQL
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install libmysql:x64-windows
+
+      ###################################################
+      # Configure Linux
+      ###################################################
+
+      - name: Configure Linux
+        if: runner.os == 'Linux'
+        run: |
+          cmake \
+            -B build \
             -DCMAKE_BUILD_TYPE=Release
-        fi
-      shell: bash
 
-    ####################################################
-    # Build
-    ####################################################
+      ###################################################
+      # Configure Windows
+      ###################################################
 
-    - name: Build
-      run: cmake --build build --config Release
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        run: |
+          cmake `
+            -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
 
-    ####################################################
-    # Test
-    ####################################################
+      ###################################################
+      # Build
+      ###################################################
 
-    - name: Test
-      run: ctest --test-dir build --build-config Release
+      - name: Build
+        run: cmake --build build --config Release
+
+      ###################################################
+      # Test
+      ###################################################
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release
