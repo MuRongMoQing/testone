@@ -13,7 +13,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <mysql.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -565,12 +564,12 @@ std::string readFile(const std::string& path) {
 std::string serveStatic(const Request& req) {
     std::string path = req.path == "/" ? "/index.html" : req.path;
     if (path.find("..") != std::string::npos) {
-        return errorResponse(404, "��Դ������");
+        return errorResponse(404, "资源不存在");
     }
     std::string filePath = "public" + path;
     std::string content = readFile(filePath);
     if (content.empty()) {
-        return errorResponse(404, "��Դ������");
+        return errorResponse(404, "资源不存在");
     }
     return response(200, mimeType(filePath), content);
 }
@@ -592,10 +591,10 @@ std::string handleRequest(const Request& req) {
         return handleTakeGoods(req);
     }
     if (req.path.rfind("/api/", 0) == 0) {
-        return errorResponse(404, "�ӿڲ�����");
+        return errorResponse(404, "接口不存在");
     }
     if (req.method != "GET") {
-        return errorResponse(405, "������֧��");
+        return errorResponse(405, "方法不支持");
     }
     return serveStatic(req);
 }
@@ -661,7 +660,7 @@ void handleClient(Socket client) {
     Request req;
     std::string output = parseRequest(raw, req)
         ? handleRequest(req)
-        : errorResponse(400, "�����ʽ����");
+        : errorResponse(400, "请求格式错误");
     send(client, output.c_str(), static_cast<int>(output.size()), 0);
     closeSocket(client);
 }
