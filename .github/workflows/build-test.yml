@@ -1,0 +1,72 @@
+name: Build Test (Multi-Platform)
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+    branches: ["master", "main"]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: "Ubuntu / GCC"
+            c_compiler: gcc
+            cpp_compiler: g++
+
+          - os: ubuntu-latest
+            name: "Ubuntu / Clang"
+            c_compiler: clang
+            cpp_compiler: clang++
+
+          - os: windows-latest
+            name: "Windows / MSVC"
+            c_compiler: cl
+            cpp_compiler: cl
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Ubuntu ──
+      - name: Install system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libmysqlclient-dev pkg-config
+
+      # ── Windows ──
+      - name: Setup vcpkg
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
+          call .\vcpkg\bootstrap-vcpkg.bat
+
+      - name: Install libmysql via vcpkg
+        if: runner.os == 'Windows'
+        run: .\vcpkg\vcpkg.exe install libmysql:x64-windows
+
+      - name: Set CMake toolchain (Windows)
+        if: runner.os == 'Windows'
+        id: toolchain
+        shell: bash
+        run: |
+          echo "args=-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> "$GITHUB_OUTPUT"
+
+      - name: Configure CMake
+        run: >
+          cmake -B ${{ github.workspace }}/build
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+          -DCMAKE_BUILD_TYPE=Release
+          ${{ steps.toolchain.outputs.args }}
+          -S ${{ github.workspace }}
+
+      - name: Build
+        run: cmake --build ${{ github.workspace }}/build --config Release
