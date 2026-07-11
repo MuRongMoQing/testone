@@ -13,7 +13,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <mysql.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -32,7 +31,11 @@ using Socket = int;
 #define SOCKET_ERROR (-1)
 #endif
 
+#ifdef _WIN32
 #include <mysql.h>
+#else
+#include <mysql/mysql.h>
+#endif
 
 namespace {
     constexpr int kPort = 8081;
