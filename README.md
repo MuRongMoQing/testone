@@ -1,84 +1,86 @@
 # 仓储存取系统
 
-这是一个 C++ 后端 + 静态前端的前后端分离示例项目，支持货物入库、查询、取出、自动编号、已取出旧记录自动清理，以及不同权限用户登录。
+C++ 后端 + 静态前端的前后端分离仓库管理系统。支持货物入库、查询、取出、自动编号、超期记录自动清理及三级权限控制。
 
 ## 功能
 
-- 新货物入库时自动生成编号，例如 `G000001`
-- 保存货物名、货位、状态、入库时间、取出时间和操作员
-- 支持按货物名和状态查询
-- 支持取出货物，取出后状态变为 `taken`
-- 已取出超过 30 天的旧空缺记录会在后续请求中自动移除
-- 用户权限：
-  - `admin/admin123`：查询、入库、取出
-  - `manager/manager123`：查询、入库、取出
-  - `viewer/viewer123`：仅查询
-- 后端 API 与前端页面分离，前端通过 HTTP API 调用后端
+| 功能 | 说明 |
+|------|------|
+| 入库 | 填写货物名称与货位，自动生成编号（`G000001` 格式） |
+| 查询 | 按货物名（模糊）和状态（在库/已取出）筛选 |
+| 取出 | 将货物状态置为 `taken`，记录取出时间与操作员 |
+| 自动清理 | 已取出超 30 天的记录在后续请求中自动删除 |
+| 权限控制 | 三级角色：admin、manager、viewer |
+| 登录鉴权 | Bearer Token，会话保存在内存中 |
 
-## 构建运行
+### 用户角色
 
-如果本机已安装 CMake：
+| 角色 | 默认账号 | 查询 | 入库 | 取出 |
+|------|----------|:--:|:--:|:--:|
+| admin | `admin` / `admin123` | ✓ | ✓ | ✓ |
+| manager | `manager` / `manager123` | ✓ | ✓ | ✓ |
+| viewer | `viewer` / `viewer123` | ✓ | ✗ | ✗ |
+
+## 快速开始
+
+### 前置条件
+
+- C++17 编译器（MSVC 2019+、GCC 8+ 或 Clang 7+）
+- CMake ≥ 3.16
+- MySQL 8.0（已创建数据库 `first_test`）
+
+### 构建 & 运行
 
 ```powershell
+# Windows (MSVC + Ninja)
 cmake -S . -B build
 cmake --build build
-.\build\Debug\warehouse_server.exe
+.\build\warehouse_server.exe
 ```
 
-如果使用 MinGW：
+启动后访问 **http://localhost:8081**。
 
-```powershell
-g++ -std=c++17 src\main.cpp -lws2_32 -o warehouse_server.exe
-.\warehouse_server.exe
+> MySQL 连接参数硬编码在 `src/main.cpp` 第 216 行：`localhost:3306`，用户 `root`，密码 `JBY@ll370079`，数据库 `first_test`。如需修改，编辑该行后重新编译。
+
+## 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 后端 | C++17、原生 Berkeley Sockets、libmysql |
+| 前端 | 原生 HTML/CSS/JS（无框架） |
+| 数据库 | MySQL 8.0（InnoDB，utf8mb4） |
+| 构建 | CMake + Ninja (Windows) / Make (Linux) |
+| CI | GitHub Actions（多平台矩阵：Windows + Linux） |
+
+## 项目结构
+
+```
+.
+├── src/
+│   └── main.cpp          # 后端全部代码（单文件，~750 行）
+├── public/
+│   ├── index.html        # 前端登录 + 管理页面
+│   ├── app.js            # 前端逻辑（API 调用、DOM 操作）
+│   └── styles.css        # 前端样式
+├── CMakeLists.txt         # CMake 构建配置
+├── CMakeSettings.json     # Visual Studio CMake 配置
+├── .github/workflows/     # CI 流水线
+└── docs/                  # 更多文档 →
+    ├── API.md             # API 接口参考
+    └── DEVELOPMENT.md     # 开发指南与架构说明
 ```
 
-Linux/macOS：
+## API 概览
 
-```bash
-g++ -std=c++17 src/main.cpp -pthread -o warehouse_server
-./warehouse_server
-```
+| 方法 | 路径 | 说明 | 鉴权 |
+|------|------|------|:--:|
+| POST | `/api/login` | 登录，返回 token | ✗ |
+| GET | `/api/goods` | 查询货物列表 | ✓ |
+| POST | `/api/goods` | 入库新货物 | ✓ (manager+) |
+| POST | `/api/goods/take` | 取出货物 | ✓ (manager+) |
 
-启动后访问：
+详细请求/响应格式见 [API.md](docs/API.md)。
 
-```text
-http://localhost:8081
-```
+## 许可证
 
-数据会保存到运行目录下的 `warehouse_data.tsv`。
-
-## API
-
-### 登录
-
-`POST /api/login`
-
-```json
-{"username":"admin","password":"admin123"}
-```
-
-### 查询货物
-
-`GET /api/goods?name=电脑&status=stored`
-
-需要请求头：
-
-```text
-Authorization: Bearer <token>
-```
-
-### 入库
-
-`POST /api/goods`
-
-```json
-{"name":"显示器","location":"A-01"}
-```
-
-### 取出
-
-`POST /api/goods/take`
-
-```json
-{"id":"G000001"}
-```
+MIT License — 详见 [LICENSE.txt](LICENSE.txt)。
