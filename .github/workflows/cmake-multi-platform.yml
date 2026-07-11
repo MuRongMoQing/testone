@@ -1,4 +1,4 @@
-name: CMake on multiple platforms
+name: CMake Build
 
 on:
   push:
@@ -16,6 +16,7 @@ jobs:
       fail-fast: false
 
       matrix:
+
         include:
 
           - os: ubuntu-latest
@@ -35,17 +36,13 @@ jobs:
 
     steps:
 
-      ###################################################
-      # Checkout
-      ###################################################
-
       - uses: actions/checkout@v4
 
-      ###################################################
-      # Linux dependencies
-      ###################################################
+###########################################################
+# Linux
+###########################################################
 
-      - name: Install Linux dependencies
+      - name: Install Linux packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
@@ -53,66 +50,57 @@ jobs:
             default-libmysqlclient-dev \
             pkg-config
 
-      ###################################################
-      # Setup compiler (Linux)
-      ###################################################
-
-      - name: Set compiler
-        if: runner.os == 'Linux'
-        run: |
-          echo "CC={{ matrix.cc }}" >> {{ matrix.cc }}" >> GITHUB_ENV
-          echo "CXX={{ matrix.cxx }}" >> {{ matrix.cxx }}" >> GITHUB_ENV
-
-      ###################################################
-      # Setup vcpkg (Windows)
-      ###################################################
-
-      - name: Setup vcpkg
-        if: runner.os == 'Windows'
-        uses: lukka/run-vcpkg@v11
-
-      ###################################################
-      # Install MySQL (Windows)
-      ###################################################
-
-      - name: Install MySQL
-        if: runner.os == 'Windows'
-        run: |
-          vcpkg install libmysql:x64-windows
-
-      ###################################################
-      # Configure Linux
-      ###################################################
-
       - name: Configure Linux
         if: runner.os == 'Linux'
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
         run: |
           cmake \
             -B build \
             -DCMAKE_BUILD_TYPE=Release
 
-      ###################################################
-      # Configure Windows
-      ###################################################
+###########################################################
+# Windows
+###########################################################
+
+      - name: Clone vcpkg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git
+
+      - name: Bootstrap vcpkg
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\vcpkg\bootstrap-vcpkg.bat
+
+      - name: Install MySQL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\vcpkg\vcpkg.exe install libmysql:x64-windows
 
       - name: Configure Windows
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           cmake `
             -B build `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+            -DCMAKE_TOOLCHAIN_FILE="$PWD\vcpkg\scripts\buildsystems\vcpkg.cmake"
 
-      ###################################################
-      # Build
-      ###################################################
+###########################################################
+# Build
+###########################################################
 
       - name: Build
         run: cmake --build build --config Release
 
-      ###################################################
-      # Test
-      ###################################################
+###########################################################
+# Test
+###########################################################
 
       - name: Test
         run: ctest --test-dir build --build-config Release
