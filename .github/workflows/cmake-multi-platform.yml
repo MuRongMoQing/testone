@@ -57,6 +57,11 @@ jobs:
         ./vcpkg/bootstrap-vcpkg.bat
         ./vcpkg/vcpkg install libmysql:x64-windows
 
+    - name: Show installed packages
+     if: runner.os == 'Windows'
+     run: |
+        dir vcpkg\installed\x64-windows\share
+
     ####################################################
     # Configure
     ####################################################
