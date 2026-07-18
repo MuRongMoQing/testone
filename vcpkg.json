@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "warehouse-storage-system",
+  "version-string": "1.0.0",
+  "builtin-baseline": "4e82e29f14eac2b3422f18f72c7524d04f19924e",
+  "dependencies": [
+    "libmysql",
+    "libsodium"
+  ]
+}

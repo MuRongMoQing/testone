@@ -1,8 +1,22 @@
-### Example user template template
-### Example user template
+# Build output
+/build/
+/cmake-build-*/
+/out/
+/gen/
+/vcpkg_installed/
 
-# IntelliJ project files
-.idea
+# IDE-local files
+/.idea/
 *.iml
-out
-gen
+
+# Local tool and agent state
+/.codegraph/
+/.omo/
+
+# Runtime output
+*.log
+
+# Local environment secrets
+.env
+.env.*
+!.env.example

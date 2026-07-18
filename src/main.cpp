@@ -1,7 +1,10 @@
+#include "password_hash.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -12,6 +15,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -43,7 +47,6 @@ constexpr int kVacancyRetentionDays = 30;
 
 struct User {
     std::string username;
-    std::string password;
     std::string role;
 };
 
@@ -203,6 +206,226 @@ std::string dbEscape(const std::string& s) {
     return std::string(buf.data());
 }
 
+struct DatabaseConfig {
+    std::string host;
+    unsigned int port = 0;
+    std::string name;
+    std::string user;
+    std::string password;
+};
+
+struct StoredPassword {
+    unsigned long long id = 0;
+    std::string value;
+};
+
+bool readRequiredEnvironment(const char* name, std::string& value) {
+    const char* raw = std::getenv(name);
+    if (!raw || !raw[0]) {
+        std::cerr << "Missing required environment variable: " << name << "\n";
+        return false;
+    }
+    value = raw;
+    return true;
+}
+
+bool loadDatabaseConfig(DatabaseConfig& config) {
+    std::string portText;
+    bool valid = readRequiredEnvironment("WAREHOUSE_DB_HOST", config.host);
+    valid = readRequiredEnvironment("WAREHOUSE_DB_PORT", portText) && valid;
+    valid = readRequiredEnvironment("WAREHOUSE_DB_NAME", config.name) && valid;
+    valid = readRequiredEnvironment("WAREHOUSE_DB_USER", config.user) && valid;
+    valid = readRequiredEnvironment("WAREHOUSE_DB_PASSWORD", config.password) && valid;
+    if (!valid) {
+        warehouse::security::clearSensitiveString(config.password);
+        return false;
+    }
+
+    char* end = nullptr;
+    const long port = std::strtol(portText.c_str(), &end, 10);
+    if (!end || *end != '\0' || port < 1 || port > 65535) {
+        std::cerr << "WAREHOUSE_DB_PORT must be an integer from 1 to 65535\n";
+        warehouse::security::clearSensitiveString(config.password);
+        return false;
+    }
+    config.port = static_cast<unsigned int>(port);
+    return true;
+}
+
+bool passwordMigrationEnabled() {
+    const char* raw = std::getenv("WAREHOUSE_MIGRATE_PASSWORDS");
+    if (!raw) {
+        return false;
+    }
+    const std::string value = lower(raw);
+    return value == "1" || value == "true" || value == "yes";
+}
+
+bool loadStoredPasswords(const bool forUpdate, std::vector<StoredPassword>& records) {
+    const std::string sql = "SELECT id, password FROM users" +
+        std::string(forUpdate ? " FOR UPDATE" : "");
+    if (mysql_query(g_db, sql.c_str()) != 0) {
+        std::cerr << "MySQL password migration query failed: " << mysql_error(g_db) << "\n";
+        return false;
+    }
+    MYSQL_RES* result = mysql_store_result(g_db);
+    if (!result) {
+        std::cerr << "MySQL password migration result failed: " << mysql_error(g_db) << "\n";
+        return false;
+    }
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(result))) {
+        StoredPassword record;
+        record.id = row[0] ? std::strtoull(row[0], nullptr, 10) : 0;
+        record.value = row[1] ? row[1] : "";
+        records.push_back(std::move(record));
+    }
+    mysql_free_result(result);
+    return true;
+}
+
+void clearStoredPasswords(std::vector<StoredPassword>& records) {
+    for (auto& record : records) {
+        warehouse::security::clearSensitiveString(record.value);
+    }
+}
+
+bool containsInvalidPasswordHash(const std::vector<StoredPassword>& records) {
+    return std::any_of(records.begin(), records.end(), [](const StoredPassword& record) {
+        return warehouse::security::classifyStoredPassword(record.value) ==
+            warehouse::security::StoredPasswordKind::InvalidPasswordHash;
+    });
+}
+
+bool containsLegacyPassword(const std::vector<StoredPassword>& records) {
+    return std::any_of(records.begin(), records.end(), [](const StoredPassword& record) {
+        return warehouse::security::classifyStoredPassword(record.value) ==
+            warehouse::security::StoredPasswordKind::LegacyPlaintext;
+    });
+}
+
+bool migrateLegacyPasswords() {
+    std::vector<StoredPassword> initialRecords;
+    if (!loadStoredPasswords(false, initialRecords)) {
+        return false;
+    }
+    const bool invalidInitialHash = containsInvalidPasswordHash(initialRecords);
+    const bool hasLegacyPassword = containsLegacyPassword(initialRecords);
+    clearStoredPasswords(initialRecords);
+    if (invalidInitialHash) {
+        std::cerr << "Password migration stopped: an invalid Argon2 hash is stored\n";
+        return false;
+    }
+    if (!hasLegacyPassword) {
+        return true;
+    }
+    if (!passwordMigrationEnabled()) {
+        std::cerr << "Legacy plaintext passwords detected. Back up MySQL, then set "
+                  << "WAREHOUSE_MIGRATE_PASSWORDS=1 for one authorized startup.\n";
+        return false;
+    }
+
+    if (mysql_query(g_db, "START TRANSACTION") != 0) {
+        std::cerr << "Cannot start password migration transaction: " << mysql_error(g_db) << "\n";
+        return false;
+    }
+
+    std::vector<StoredPassword> lockedRecords;
+    const bool loadedLockedRecords = loadStoredPasswords(true, lockedRecords);
+    const bool invalidLockedHash = loadedLockedRecords && containsInvalidPasswordHash(lockedRecords);
+    if (!loadedLockedRecords || invalidLockedHash) {
+        clearStoredPasswords(lockedRecords);
+        mysql_query(g_db, "ROLLBACK");
+        std::cerr << "Password migration rolled back before making changes\n";
+        return false;
+    }
+
+    for (auto& record : lockedRecords) {
+        if (warehouse::security::classifyStoredPassword(record.value) !=
+            warehouse::security::StoredPasswordKind::LegacyPlaintext) {
+            continue;
+        }
+        std::string hash;
+        std::string error;
+        if (!warehouse::security::hashPassword(record.value, hash, error)) {
+            clearStoredPasswords(lockedRecords);
+            mysql_query(g_db, "ROLLBACK");
+            std::cerr << "Password migration rolled back: " << error << "\n";
+            return false;
+        }
+        const std::string update = "UPDATE users SET password='" + dbEscape(hash) +
+            "' WHERE id=" + std::to_string(record.id);
+        if (mysql_query(g_db, update.c_str()) != 0) {
+            const std::string updateError = mysql_error(g_db);
+            clearStoredPasswords(lockedRecords);
+            mysql_query(g_db, "ROLLBACK");
+            std::cerr << "Password migration rolled back: " << updateError << "\n";
+            return false;
+        }
+        warehouse::security::clearSensitiveString(record.value);
+    }
+
+    clearStoredPasswords(lockedRecords);
+    if (mysql_query(g_db, "COMMIT") != 0) {
+        const std::string commitError = mysql_error(g_db);
+        mysql_query(g_db, "ROLLBACK");
+        std::cerr << "Password migration commit failed: " << commitError << "\n";
+        return false;
+    }
+    std::cout << "Legacy user passwords migrated to Argon2id.\n";
+    return true;
+}
+
+bool ensureAdminUser() {
+    if (mysql_query(g_db, "SELECT COUNT(*) FROM users WHERE role='admin'") != 0) {
+        std::cerr << "MySQL admin check failed: " << mysql_error(g_db) << "\n";
+        return false;
+    }
+    MYSQL_RES* result = mysql_store_result(g_db);
+    if (!result) {
+        std::cerr << "MySQL admin result failed: " << mysql_error(g_db) << "\n";
+        return false;
+    }
+    MYSQL_ROW row = mysql_fetch_row(result);
+    const unsigned long long adminCount = row && row[0] ? std::strtoull(row[0], nullptr, 10) : 0;
+    if (result) {
+        mysql_free_result(result);
+    }
+    if (adminCount > 0) {
+        return true;
+    }
+
+    std::string username;
+    std::string password;
+    bool valid = readRequiredEnvironment("WAREHOUSE_ADMIN_USERNAME", username);
+    valid = readRequiredEnvironment("WAREHOUSE_ADMIN_PASSWORD", password) && valid;
+    username = normalizeField(username);
+    if (!valid || username.empty() || username.size() > 64 || password.size() < 12 ||
+        password.size() > 128) {
+        std::cerr << "Initial admin username must be 1-64 characters and password 12-128 characters\n";
+        warehouse::security::clearSensitiveString(password);
+        return false;
+    }
+
+    std::string hash;
+    std::string error;
+    if (!warehouse::security::hashPassword(password, hash, error)) {
+        warehouse::security::clearSensitiveString(password);
+        std::cerr << error << "\n";
+        return false;
+    }
+    warehouse::security::clearSensitiveString(password);
+    const std::string insert = "INSERT INTO users (username,password,role) VALUES ('" +
+        dbEscape(username) + "','" + dbEscape(hash) + "','admin')";
+    if (mysql_query(g_db, insert.c_str()) != 0) {
+        std::cerr << "MySQL initial admin creation failed: " << mysql_error(g_db) << "\n";
+        return false;
+    }
+    std::cout << "Initial administrator created from environment variables.\n";
+    return true;
+}
+
     std::time_t dbTimeToTimeT(const std::string& datetime) {
     std::tm tm = {};
     int year = 0, month = 0, day = 0, hour = 0, min = 0, sec = 0;
@@ -229,14 +452,30 @@ std::string dbEscape(const std::string& s) {
 // ── DB lifecycle ──
 
 bool initDb() {
+    std::string hashingError;
+    if (!warehouse::security::initializePasswordHashing(hashingError)) {
+        std::cerr << hashingError << "\n";
+        return false;
+    }
+
+    DatabaseConfig config;
+    if (!loadDatabaseConfig(config)) {
+        return false;
+    }
+
     g_db = mysql_init(nullptr);
     if (!g_db) return false;
 
-    if (!mysql_real_connect(g_db, "localhost", "root", "JBY@ll370079", "first_test",
-                            3306, nullptr, 0)) {
+    if (!mysql_real_connect(g_db, config.host.c_str(), config.user.c_str(),
+                            config.password.c_str(), config.name.c_str(), config.port,
+                            nullptr, 0)) {
+        warehouse::security::clearSensitiveString(config.password);
         std::cerr << "MySQL connect error: " << mysql_error(g_db) << "\n";
+        mysql_close(g_db);
+        g_db = nullptr;
         return false;
     }
+    warehouse::security::clearSensitiveString(config.password);
 
     const char* createUsers =
         "CREATE TABLE IF NOT EXISTS users ("
@@ -260,17 +499,14 @@ bool initDb() {
     if (mysql_query(g_db, createUsers) != 0 ||
         mysql_query(g_db, createGoods) != 0) {
         std::cerr << "MySQL create table error: " << mysql_error(g_db) << "\n";
+        mysql_close(g_db);
+        g_db = nullptr;
         return false;
     }
 
-    const char* seedAdmin    = "INSERT IGNORE INTO users (username,password,role) VALUES ('admin','admin123','admin')";
-    const char* seedManager  = "INSERT IGNORE INTO users (username,password,role) VALUES ('manager','manager123','manager')";
-    const char* seedViewer   = "INSERT IGNORE INTO users (username,password,role) VALUES ('viewer','viewer123','viewer')";
-
-    if (mysql_query(g_db, seedAdmin) != 0 ||
-        mysql_query(g_db, seedManager) != 0 ||
-        mysql_query(g_db, seedViewer) != 0) {
-        std::cerr << "MySQL seed error: " << mysql_error(g_db) << "\n";
+    if (!migrateLegacyPasswords() || !ensureAdminUser()) {
+        mysql_close(g_db);
+        g_db = nullptr;
         return false;
     }
 
@@ -359,29 +595,53 @@ std::string handleLogin(const Request& req) {
     std::string username = getJsonString(req.body, "username");
     std::string password = getJsonString(req.body, "password");
     if (username.empty() || password.empty()) {
+        warehouse::security::clearSensitiveString(password);
         return errorResponse(400, "用户名和密码不能为空");
     }
     std::lock_guard<std::mutex> lock(g_dbMutex);
     std::string sql = "SELECT username, password, role FROM users WHERE username='"
         + dbEscape(username) + "'";
     if (mysql_query(g_db, sql.c_str()) != 0) {
+        warehouse::security::clearSensitiveString(password);
         return errorResponse(500, "数据库查询失败");
     }
     MYSQL_RES* result = mysql_store_result(g_db);
     if (!result) {
+        warehouse::security::clearSensitiveString(password);
         return errorResponse(500, "数据库查询失败");
     }
     MYSQL_ROW row = mysql_fetch_row(result);
-    if (!row || std::string(row[1]) != password) {
+    if (!row) {
         mysql_free_result(result);
+        warehouse::security::clearSensitiveString(password);
         return errorResponse(401, "用户名或密码错误");
     }
     std::string dbUser = row[0];
+    std::string storedHash = row[1] ? row[1] : "";
     std::string dbRole = row[2];
     mysql_free_result(result);
+    if (!warehouse::security::verifyPassword(storedHash, password)) {
+        warehouse::security::clearSensitiveString(password);
+        return errorResponse(401, "用户名或密码错误");
+    }
+    if (warehouse::security::passwordNeedsRehash(storedHash)) {
+        std::string refreshedHash;
+        std::string error;
+        if (!warehouse::security::hashPassword(password, refreshedHash, error)) {
+            warehouse::security::clearSensitiveString(password);
+            return errorResponse(500, "密码哈希升级失败");
+        }
+        const std::string update = "UPDATE users SET password='" + dbEscape(refreshedHash) +
+            "' WHERE username='" + dbEscape(dbUser) + "'";
+        if (mysql_query(g_db, update.c_str()) != 0) {
+            warehouse::security::clearSensitiveString(password);
+            return errorResponse(500, "密码哈希升级失败");
+        }
+    }
+    warehouse::security::clearSensitiveString(password);
     std::string token = username + "-" + std::to_string(std::time(nullptr))
         + "-" + std::to_string(g_tokenSeed++);
-    g_sessions[token] = {dbUser, password, dbRole};
+    g_sessions[token] = {dbUser, dbRole};
     return jsonResponse(200,
         "{\"token\":" + jsonString(token)
         + ",\"role\":" + jsonString(dbRole)

@@ -38,26 +38,26 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libmysqlclient-dev pkg-config
+          sudo apt-get install -y -qq libmysqlclient-dev libsodium-dev pkg-config
 
       # ── Windows ──
       - name: Setup vcpkg
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
-          call .\vcpkg\bootstrap-vcpkg.bat
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git "%RUNNER_TEMP%\vcpkg"
+          call "%RUNNER_TEMP%\vcpkg\bootstrap-vcpkg.bat" -disableMetrics
 
-      - name: Install libmysql via vcpkg
+      - name: Install manifest dependencies
         if: runner.os == 'Windows'
-        run: .\vcpkg\vcpkg.exe install libmysql:x64-windows
+        run: "& $env:RUNNER_TEMP\\vcpkg\\vcpkg.exe install --triplet x64-windows --x-manifest-root=${{ github.workspace }}"
 
       - name: Set CMake toolchain (Windows)
         if: runner.os == 'Windows'
         id: toolchain
         shell: bash
         run: |
-          echo "args=-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> "$GITHUB_OUTPUT"
+          echo "args=-DCMAKE_TOOLCHAIN_FILE=${{ runner.temp }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> "$GITHUB_OUTPUT"
 
       - name: Configure CMake
         run: >
@@ -70,3 +70,6 @@ jobs:
 
       - name: Build
         run: cmake --build ${{ github.workspace }}/build --config Release
+
+      - name: Test
+        run: ctest --test-dir ${{ github.workspace }}/build -C Release --output-on-failure
