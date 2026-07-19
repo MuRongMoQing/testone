@@ -1,8 +1,10 @@
 # 仓储存取系统
 
-C++ 后端 + 静态前端的仓储管理系统。支持货物入库、查询、取出、自动编号、超期记录清理、三级权限控制，以及基于 Argon2id 的密码验证。
+> **当前状态：遗留实现。** 本页“功能、运行和 API”描述当前可运行代码，不代表已批准的目标能力。目标架构、权限和实施阶段分别见 [系统架构](docs/ARCHITECTURE.md)、[身份与权限](docs/PERMISSIONS.md)、[领域语言](CONTEXT.md) 和 [实施计划](docs/IMPLEMENTATION_PLAN.md)。阶段 0 仅整理规范，目标功能尚未实现。
 
-## 功能
+C++ 后端 + 静态前端的遗留仓储管理系统。当前仅支持货物入库、查询、取出、自动编号、超期记录清理、三级权限控制，以及基于 Argon2id 的密码验证；这些遗留行为将按实施计划逐阶段迁移，其中物理清理、角色等级和内存 Token 都不是目标设计。
+
+## 当前遗留功能
 
 | 功能 | 说明 |
 |------|------|
@@ -95,7 +97,7 @@ $env:WAREHOUSE_MIGRATE_PASSWORDS = "1"
 └── vcpkg.json                # Windows C++ 依赖清单
 ```
 
-## API 概览
+## 当前遗留 API 概览
 
 | 方法 | 路径 | 说明 | 鉴权 |
 |------|------|------|:--:|
@@ -104,7 +106,7 @@ $env:WAREHOUSE_MIGRATE_PASSWORDS = "1"
 | POST | `/api/goods` | 入库新货物 | manager+ |
 | POST | `/api/goods/take` | 取出货物 | manager+ |
 
-详细格式见 [API 参考](docs/API.md)，开发与迁移说明见 [开发指南](docs/DEVELOPMENT.md)。
+详细格式见 [当前遗留 API 参考](docs/API.md)，开发与迁移说明见 [开发指南](docs/DEVELOPMENT.md)。计划中的 `/api/v1` 尚未实现，其资源边界和引入阶段只在实施计划及 ADR 0036 中记录。
 
 ## 许可证
 

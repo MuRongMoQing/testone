@@ -1,6 +1,8 @@
-# API 参考
+# 当前遗留 API 参考
 
-仓储存取系统后端 API，默认基地址为 `http://localhost:8081`。所有请求和响应均使用 `application/json; charset=utf-8`。
+> **实现状态：CURRENT LEGACY。** 本文件以下接口与安全行为对应当前 `src/main.cpp`，不是目标 `/api/v1` 契约。计划中的 Cookie 会话、CSRF、六身份权限、库存申请和多仓接口尚未实现；其实施顺序见 [实施计划](IMPLEMENTATION_PLAN.md)，版本策略见 [ADR 0036](adr/0036-version-new-apis-under-api-v1.md)。
+
+当前遗留后端 API 的默认基地址为 `http://localhost:8081`。所有请求和响应均使用 `application/json; charset=utf-8`。
 
 ## 登录
 
@@ -104,3 +106,9 @@ Authorization: Bearer <token>
 - Token 保存在进程内存中，服务重启后失效。
 - 服务当前返回 `Access-Control-Allow-Origin: *`。
 - 每次查询、入库或取出前，物理删除已取出超过 30 天的记录。
+
+## 已批准但尚未实现的目标接口
+
+所有新业务接口计划进入 `/api/v1`，当前阶段不得视为可调用。目标资源组包括会话/TOTP/通知、仓库与货位、SKU 与汇总库存、附件、公共库存申请及审批/复核/取消/执行、治理、会计、跨仓调拨和账册集成。普通列表计划使用默认 50、最大 200 条的稳定键游标并返回 `items`/`nextCursor`；错误对象计划包含 `code`、`message`、`details`、`requestId`。
+
+旧接口将在对应新用例、数据迁移、对账和用户审批完成前冻结保留；本文件只有在相应代码真实落地后才能增加已实现 `/api/v1` 请求与响应示例。
