@@ -1,0 +1,6 @@
+id=002_goods
+phase=expand
+execution=atomic_ddl
+apply=002_goods.apply.sql
+verify=002_goods.verify.sql
+sha256=a1e29f400c234e74f5b5cafcd74b21b6ff43bc9d29ccca7e6833fdc709686772

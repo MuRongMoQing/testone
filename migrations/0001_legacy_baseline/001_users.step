@@ -1,0 +1,6 @@
+id=001_users
+phase=expand
+execution=atomic_ddl
+apply=001_users.apply.sql
+verify=001_users.verify.sql
+sha256=20e59c574680056e78e481b605d46117b8f503b2f54c479e458fda2917eb4901

@@ -5,11 +5,11 @@
 | 项目 | 值 |
 |---|---|
 | 规范角色 | 唯一实施计划与阶段状态来源 |
-| 当前阶段 | 阶段 0：规范落库 |
+| 当前阶段 | 阶段 1：平台基础 |
 | 当前状态 | `APPROVED` |
-| 后续阶段 | 全部 `NOT_STARTED` |
+| 后续阶段 | 阶段 2–10 全部 `NOT_STARTED` |
 | 生产迁移授权 | 未授权 |
-| 当前实施范围 | 只修改规范文档，不修改代码、SQL、CI 或依赖 |
+| 当前实施范围 | 阶段 1：模块化、HTTP/JSON、MySQL RAII、可重入迁移、旧协议兼容及停止物理删除；不实施阶段 2+ 业务能力 |
 
 本计划以仓库根目录的 `CONTEXT.md`、本目录的 `ARCHITECTURE.md`、`PERMISSIONS.md` 及 `adr/0001` 至 `adr/0040` 为决策来源。术语表解释业务词义，架构文档解释目标结构，权限文档解释身份边界，ADR 解释单项取舍；本文件负责把这些决策映射为有依赖顺序的实施工作、验收和用户审查门。
 
@@ -22,7 +22,7 @@
 
 ## 当前事实与目标边界
 
-当前实现仍是 C++17 单文件后端、MySQL `users`/`goods` 两表、手写 Socket/HTTP、正则 JSON、字符串 SQL、内存 Bearer Token、三级角色和静态原生前端。唯一自动化测试是密码哈希测试。当前工作环境曾实际返回找不到 `cmake`、`ctest` 和 `ninja`，因此截至本规范建立时没有可声称通过的本地构建或 CTest。
+阶段 1 已把编译路径重构为 C++17 模块化单体：`main` 进入组合根，HTTP/JSON、typed 应用用例、MySQL RAII/工作单元、版本化迁移和启动生命周期分属独立目标；旧单文件实现只作为未编译参考保留。当前仍只有遗留 `users`/`goods` 业务表、内存 Bearer Token、三级角色和静态原生前端，不存在 `/api/v1`、六身份或新库存业务能力。Debug 与 Release 的完整 CTest 各 14 项均已运行通过，其中第 14 项在专用本地 MySQL 8 测试库上真实执行；这只证明阶段 1 的本地门禁，不代表 CI、生产迁移或后续阶段能力。
 
 目标是一个 C++17 模块化单体和一个 MySQL 8 数据库，使用 `cpp-httplib`、`nlohmann/json`、RAII `libmysql`、libsodium、OpenSSL 3，以及 Vue 3 + Vite + TypeScript 前端。除非某阶段报告提供真实实现和验证证据，目标能力不得描述为当前能力。
 
@@ -169,8 +169,8 @@
 
 | 阶段 | 状态 | 目标 | 并行 Agent | 审查门 |
 |---|---|---|---|---|
-| 0 规范落库 | `APPROVED` | 同步术语、架构、权限、ADR、API/开发状态和本计划 | requirements_trace、architecture_consistency、plan_validation（只读） | 用户已批准；阶段 1 尚未启动 |
-| 1 平台基础 | `NOT_STARTED` | 模块化、HTTP/JSON、MySQL RAII、可重入迁移 | mysql_foundation、api_foundation、bootstrap_foundation | 构建、旧协议、连接池和迁移失败语义 |
+| 0 规范落库 | `APPROVED` | 同步术语、架构、权限、ADR、API/开发状态和本计划 | requirements_trace、architecture_consistency、plan_validation（只读） | 用户已批准并已提交推送 |
+| 1 平台基础 | `APPROVED` | 模块化、HTTP/JSON、MySQL RAII、可重入迁移 | mysql_foundation、api_foundation、bootstrap_foundation；独立双复审 | 本地门禁通过且用户已审查批准；随本次阶段提交推送 |
 | 2 身份与组织 | `NOT_STARTED` | 六身份、TOTP、会话、权限范围、仓库/货位、审计通知 | identity_security、authorization_organization、audit_notifications | 权限矩阵、安全时限、双控和审计链 |
 | 3 目录与库存 | `NOT_STARTED` | SKU、批次、流水、余额、FIFO、归档、旧数据 | warehousing_catalog、inventory_core、legacy_migration_spec | 对账、重建、精度和生命周期 |
 | 4 附件与汇率 | `NOT_STARTED` | LONGBLOB、ClamAV、四币种、双源缓存 | documents、malware_scanning、money_fx | 失败关闭和真实供应商验证 |
@@ -275,4 +275,67 @@
 | Vue/Vitest/Playwright | `NOT_RUN` | 前端目标尚未实施 |
 | CI | `NOT_RUN` | 未修改或触发 CI |
 
-阶段 0 已由用户批准，状态为 `APPROVED`。阶段 1 仍为 `NOT_STARTED`，在用户明确要求开始前不执行代码、依赖、数据库或 CI 变更。
+阶段 0 已由用户批准，状态为 `APPROVED`。
+
+### 阶段 0 批准、提交与推送记录
+
+- 用户批准后生成描述：批准并落库已确认的库存、会计、权限、安全、迁移与集成规范，建立 ADR 追踪、阶段门和获批后自动提交推送规则。
+- 提交命令：`git commit`，退出码 0，提交 `f86ec2d`，标题为 `docs: approve warehouse system specification`。
+- 推送命令：`git push origin master`，退出码 0；远端 `origin/master` 从 `8daceb2` 前进到 `f86ec2d`。
+- 阶段 0 提交共 46 个文档文件，1369 行新增、22 行删除；未包含业务代码、SQL 或 CI。
+
+用户随后明确要求开始阶段 1，因此阶段 1 已切换为 `IN_PROGRESS`。本次启动不构成生产数据库迁移、真实外部系统连接或生产发布授权。
+
+## 阶段 1 验证记录
+
+验证环境：Windows 11、PowerShell、MSVC 19.51、CMake/Ninja、vcpkg、本机 MySQL 8 专用测试库；工作区 `X:\projects\clionproject`。阶段 1 已完成代码实现、本地 Debug/Release 构建、完整 CTest 和真实 MySQL 8 集成门禁，并于 2026-07-22 获用户审查批准，因此状态为 `APPROVED`。GitHub Actions、Linux 和生产迁移仍未由本地验证替代。
+
+### 实际实现范围
+
+- 建立 `domain`、`application`、`api`、`infrastructure`、`bootstrap` 模块和 thin `main`；旧单文件仅作为未编译参考保留。
+- 使用 `cpp-httplib` 与 `nlohmann/json` 承载四个冻结遗留接口；使用有界线程/队列、固定安全上限、精确 CORS 和安全静态路径。
+- 建立 libmysql 进程/线程 RAII、连接、预处理绑定、长二进制、连接池、事务、工作单元及错误映射；请求路径不再物理删除历史货物。
+- 建立版本化 SQL 迁移：控制表 apply/verify、版本/步骤事实、全清单双向对账、覆盖 ID/阶段/执行类型/SQL 的 SHA-256、命名锁、恢复、失败停止及不可回滚项报告。
+- 增加真实 MySQL 安全门测试入口；只有显式专用测试库变量、库名含 `test` 且确认允许改表时才运行，否则返回 CTest skip 码 77。
+- 未实现阶段 2 以后六身份、Cookie/TOTP/CSRF、库存数量金额、申请审批、附件扫描、`/api/v1` 或 Vue 能力。
+
+### 最终有效门禁
+
+| 命令或检查 | 状态 | 退出码 | 实际结果 |
+|---|---|---:|---|
+| Debug `cmake --build out/build/stage1` | `PASSED` | 0 | MSVC/Ninja 完成所有阶段 1 目标链接 |
+| Debug `ctest --test-dir out/build/stage1 -C Debug --output-on-failure` | `PASSED` | 0 | 14/14 通过；`mysql_integration_test` 在专用本地 MySQL 8 测试库真实执行 |
+| Release `cmake --build out/build/stage1-release` | `PASSED` | 0 | Release 完成所有阶段 1 目标链接 |
+| Release `ctest --test-dir out/build/stage1-release -C Release --output-on-failure` | `PASSED` | 0 | 14/14 通过；`mysql_integration_test` 在专用本地 MySQL 8 测试库真实执行 |
+| Release `/UNDEBUG` 检查 | `PASSED` | 0 | `build.ninja` 中 14 个测试目标均在 `/DNDEBUG` 后使用 `/UNDEBUG` |
+| `git diff --check` | `PASSED` | 0 | 无空白错误；仅有 LF 到 CRLF 工作区转换警告 |
+| 项目 Markdown 本地文档链接 | `PASSED` | 0 | 检查 48 个项目 Markdown 文件、11 个本地文档链接，失效 0 |
+| ADR 连续/重复编号 | `PASSED` | 0 | ADR 40 个，0001–0040 缺失 0、重复 0 |
+| 当前/目标误述与编译路径遗留构造 | `PASSED` | 0 | 已知过时现状表述 0；编译路径中的物理删除、手写 Socket/escape SQL 等命中 0 |
+| 补丁与构建残留 | `PASSED` | 0 | `.patch`/`.diff` 文件 0，空 hunk 风险 0；根目录 `.obj` 与写入探针已清理 |
+
+### 未运行项
+
+| 验证 | 状态 | 原因与边界 |
+|---|---|---|
+| GitHub Actions | `NOT_RUN` | 阶段提交前未运行；推送后的远端状态必须单独检查，不能由工作流配置或本地结果代替 |
+| Linux GCC/Clang | `NOT_RUN` | 当前只在 Windows/MSVC 本地构建，不以 CI 配置代替跨平台结果 |
+| 生产数据库迁移/对账 | `NOT_RUN` | 未获生产授权；阶段 1 测试入口明确拒绝未标识为测试库的目标 |
+| 依赖、二进制和打包安全扫描 | `NOT_RUN` | 属于阶段 10 发布门；未把未扫描产物描述为可发布 |
+| `/api/v1`、Vue、ClamAV、汇率和外部账册 | `NOT_RUN` | 属于后续阶段，不是阶段 1 验收内容 |
+
+### 已保留的失败记录
+
+- 初始模块集成曾因 MySQL 绑定局部变量重名、cpp-httplib multipart API 差异、MSVC 聚合构造和测试缺少传递链接依赖而构建失败；逐项修复后才取得最终退出码 0。
+- 初始 CTest 曾为 10/11，通过前发现 HTTP error handler 把显式 400 覆盖为 404；修复并扩展测试后才得到当前结果。
+- 迁移接口深化后的一次针对性构建因 MSVC/Ninja 未识别中文 include 依赖而链接到旧函数签名，退出非零；显式重编调用方后，同组迁移测试为 2 项通过、真实 MySQL 1 项跳过。
+- 首次真实 MySQL 命令使用的本地配置仍含占位值，连接断言失败，CTest 退出 8；该次没有执行迁移 SQL。随后由主 agent 建立仅限 `warehouse_stage1_test` 的专用账户和库，未使用生产数据库。
+- 首次取得真实连接后的 Debug 集成测试用 `@@transaction_isolation` 判断单次 `SET TRANSACTION` 的隔离级别，断言失败且 CTest 退出 8。该会话变量不能证明当前单次事务的隔离语义；测试改为用第二连接提交写入并观察并发可见性后，Debug 和 Release 的目标测试及完整 CTest 均退出 0。
+- 提升权限后的首次测试命令因 `ctest` 不在 `PATH` 退出 1；一次未加载 MSVC 开发者环境的单目标构建因标准库头不可见退出 1。后续均使用 CMake 缓存记录的工具路径和 `VsDevCmd.bat` 环境重跑，未把环境失败计为测试通过。
+- 文档链接检查器曾两次因回溯正则和误递归受忽略的 vcpkg 构建树超时，另一次因错误纳入依赖文档而退出 1；这些失败没有记为通过。改用只扫描 48 个项目 Markdown 文件的线性解析器后，最终命令退出 0。
+- 独立规范/标准复审发现并已修复：Release 断言失效、运行时拼接控制表 DDL、失败状态写入未检查、迁移版本/步骤矛盾、清单篡改/删除逃逸、基线与控制表约束验证不足、列表排序变化、长二进制未走 long-data、监听失败可能虚报、测试路径和文档事实不一致。复审结论本身未替代主 agent 的构建与测试。
+- 文档收口时 `apply_patch` 持续因 Windows 沙箱刷新错误不可用，主 agent 改用 UTF-8 临时补丁和 `git apply --whitespace=error`；临时补丁已删除，最终仍以 `git diff --check` 和补丁残留检查为准。
+
+### 审查门
+
+阶段 1 的本地必要门禁已经完成，用户于 2026-07-22 明确审查通过，状态为 `APPROVED`。主 agent 按既定规则生成阶段变更描述、提交并推送；该批准不自动启动阶段 2。GitHub Actions、Linux GCC/Clang、生产数据库迁移和发布安全扫描仍分别为 `NOT_RUN`，不得由本地 MySQL 结果替代，也不得在未获相应授权时执行。

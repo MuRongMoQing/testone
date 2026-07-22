@@ -38,7 +38,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libmysqlclient-dev libsodium-dev pkg-config
+          sudo apt-get install -y -qq libcpp-httplib-dev libmysqlclient-dev libsodium-dev libssl-dev nlohmann-json3-dev pkg-config
 
       # ── Windows ──
       - name: Setup vcpkg

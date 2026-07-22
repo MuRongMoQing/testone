@@ -20,3 +20,6 @@
 .env
 .env.*
 !.env.example
+
+# Test environment
+.env.stage1-mysql-test

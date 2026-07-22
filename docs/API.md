@@ -1,6 +1,6 @@
 # 当前遗留 API 参考
 
-> **实现状态：CURRENT LEGACY。** 本文件以下接口与安全行为对应当前 `src/main.cpp`，不是目标 `/api/v1` 契约。计划中的 Cookie 会话、CSRF、六身份权限、库存申请和多仓接口尚未实现；其实施顺序见 [实施计划](IMPLEMENTATION_PLAN.md)，版本策略见 [ADR 0036](adr/0036-version-new-apis-under-api-v1.md)。
+> **实现状态：CURRENT LEGACY。** 本文件以下接口与安全行为对应当前 `src/api/legacy_http_server.cpp` 与 typed 应用服务，不是目标 `/api/v1` 契约。计划中的 Cookie 会话、CSRF、六身份权限、库存申请和多仓接口尚未实现；其实施顺序见 [实施计划](IMPLEMENTATION_PLAN.md)，版本策略见 [ADR 0036](adr/0036-version-new-apis-under-api-v1.md)。
 
 当前遗留后端 API 的默认基地址为 `http://localhost:8081`。所有请求和响应均使用 `application/json; charset=utf-8`。
 
@@ -46,6 +46,7 @@ Authorization: Bearer <token>
 ```
 
 `name` 为可选模糊匹配，`status` 可取 `stored` 或 `taken`。
+结果继续按数字 `id` 升序返回，以保持遗留协议行为。
 
 成功响应 `200`：
 
@@ -103,9 +104,10 @@ Authorization: Bearer <token>
 ## 通用行为
 
 - 所有 `/api/goods*` 端点都要求 `Authorization: Bearer <token>`。
-- Token 保存在进程内存中，服务重启后失效。
-- 服务当前返回 `Access-Control-Allow-Origin: *`。
-- 每次查询、入库或取出前，物理删除已取出超过 30 天的记录。
+- Token 由 libsodium 生成 256 位随机值并保存在进程内存中，服务重启后失效；它尚不具备目标 Cookie 会话的期限和统一撤销能力。
+- 跨源默认不授权；只有 `WAREHOUSE_CORS_ALLOWED_ORIGINS` 精确列出的来源才收到对应的 `Access-Control-Allow-Origin`，不接受通配符。
+- 服务使用有界 HTTP 工作线程与队列，并限制请求头、JSON 和总载荷；畸形 JSON 或字段类型错误返回 400。
+- 查询、入库和取出不再物理删除历史记录；30 天待归档规则将在后续库存生命周期阶段实现。
 
 ## 已批准但尚未实现的目标接口
 
