@@ -13,9 +13,24 @@ else()
 endif()
 
 find_package(Threads REQUIRED)
-find_package(httplib CONFIG REQUIRED)
+find_package(httplib CONFIG QUIET)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL 3 REQUIRED)
+
+if(TARGET httplib::httplib)
+    set(HTTPLIB_IMPLEMENTATION_TARGET httplib::httplib)
+elseif(NOT WIN32)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(HTTPLIB REQUIRED IMPORTED_TARGET cpp-httplib)
+    set(HTTPLIB_IMPLEMENTATION_TARGET PkgConfig::HTTPLIB)
+else()
+    message(FATAL_ERROR
+        "cpp-httplib was not found. Install it through the vcpkg manifest "
+        "or provide a CMake config package that exports httplib::httplib.")
+endif()
+
+add_library(warehouse_httplib INTERFACE)
+target_link_libraries(warehouse_httplib INTERFACE ${HTTPLIB_IMPLEMENTATION_TARGET})
 
 if(WIN32)
     find_package(unofficial-libmysql CONFIG REQUIRED)
@@ -78,7 +93,7 @@ add_library(warehouse_api src/api/legacy_http_server.cpp)
 target_include_directories(warehouse_api PUBLIC src)
 target_link_libraries(warehouse_api
     PUBLIC warehouse_application
-    PRIVATE httplib::httplib nlohmann_json::nlohmann_json Threads::Threads
+    PRIVATE warehouse_httplib nlohmann_json::nlohmann_json Threads::Threads
 )
 
 add_library(warehouse_bootstrap_core
@@ -148,7 +163,7 @@ if(BUILD_TESTING)
     add_warehouse_test(legacy_http_server_test
         tests/api/legacy_http_server_test.cpp warehouse_api)
     target_link_libraries(legacy_http_server_test PRIVATE
-        httplib::httplib nlohmann_json::nlohmann_json Threads::Threads)
+        warehouse_httplib nlohmann_json::nlohmann_json Threads::Threads)
     set_tests_properties(migration_test mysql_integration_test PROPERTIES
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 endif()

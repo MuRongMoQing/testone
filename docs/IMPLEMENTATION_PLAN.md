@@ -314,12 +314,13 @@
 | 当前/目标误述与编译路径遗留构造 | `PASSED` | 0 | 已知过时现状表述 0；编译路径中的物理删除、手写 Socket/escape SQL 等命中 0 |
 | 补丁与构建残留 | `PASSED` | 0 | `.patch`/`.diff` 文件 0，空 hunk 风险 0；根目录 `.obj` 与写入探针已清理 |
 
-### 未运行项
+### 失败与未运行项
 
 | 验证 | 状态 | 原因与边界 |
 |---|---|---|
-| GitHub Actions | `NOT_RUN` | 阶段提交前未运行；推送后的远端状态必须单独检查，不能由工作流配置或本地结果代替 |
-| Linux GCC/Clang | `NOT_RUN` | 当前只在 Windows/MSVC 本地构建，不以 CI 配置代替跨平台结果 |
+| GitHub Actions | `FAILED` | 推送提交 `1c92dea` 后运行 `29909826819`；三个矩阵项均在构建前失败 |
+| Linux GCC/Clang | `FAILED` | Ubuntu 24.04 已安装 `libcpp-httplib-dev`，但该包不提供当前要求的 config package；CMake 配置退出 1，构建和 CTest 均未运行 |
+| Windows/MSVC | `FAILED` | 工作流以 `--depth 1` 克隆 vcpkg，仓库不包含 manifest 固定的 `4e82e29f14eac2b3422f18f72c7524d04f19924e` baseline；依赖安装失败，配置、构建和 CTest 均未运行 |
 | 生产数据库迁移/对账 | `NOT_RUN` | 未获生产授权；阶段 1 测试入口明确拒绝未标识为测试库的目标 |
 | 依赖、二进制和打包安全扫描 | `NOT_RUN` | 属于阶段 10 发布门；未把未扫描产物描述为可发布 |
 | `/api/v1`、Vue、ClamAV、汇率和外部账册 | `NOT_RUN` | 属于后续阶段，不是阶段 1 验收内容 |
@@ -334,8 +335,10 @@
 - 提升权限后的首次测试命令因 `ctest` 不在 `PATH` 退出 1；一次未加载 MSVC 开发者环境的单目标构建因标准库头不可见退出 1。后续均使用 CMake 缓存记录的工具路径和 `VsDevCmd.bat` 环境重跑，未把环境失败计为测试通过。
 - 文档链接检查器曾两次因回溯正则和误递归受忽略的 vcpkg 构建树超时，另一次因错误纳入依赖文档而退出 1；这些失败没有记为通过。改用只扫描 48 个项目 Markdown 文件的线性解析器后，最终命令退出 0。
 - 独立规范/标准复审发现并已修复：Release 断言失效、运行时拼接控制表 DDL、失败状态写入未检查、迁移版本/步骤矛盾、清单篡改/删除逃逸、基线与控制表约束验证不足、列表排序变化、长二进制未走 long-data、监听失败可能虚报、测试路径和文档事实不一致。复审结论本身未替代主 agent 的构建与测试。
+- 推送提交 `1c92dea` 后，GitHub Actions 运行 `29909826819` 的三个矩阵项真实失败：Ubuntu/GCC 与 Ubuntu/Clang 的依赖安装成功，但 CMake 找不到 `httplib` config package；Windows/MSVC 的浅克隆 vcpkg 不含固定 baseline 的 `versions/baseline.json`。Node 运行时弃用警告不是失败原因。
+- Windows 的同一 baseline/浅克隆错误已存在于阶段 0 运行 `29674119655`，属于既有工作流缺陷；Linux 错误由阶段 1 新依赖路径暴露。两类失败都发生在构建前，因此没有任何远程跨平台编译或 CTest 结果。
 - 文档收口时 `apply_patch` 持续因 Windows 沙箱刷新错误不可用，主 agent 改用 UTF-8 临时补丁和 `git apply --whitespace=error`；临时补丁已删除，最终仍以 `git diff --check` 和补丁残留检查为准。
 
 ### 审查门
 
-阶段 1 的本地必要门禁已经完成，用户于 2026-07-22 明确审查通过，状态为 `APPROVED`。主 agent 按既定规则生成阶段变更描述、提交并推送；该批准不自动启动阶段 2。GitHub Actions、Linux GCC/Clang、生产数据库迁移和发布安全扫描仍分别为 `NOT_RUN`，不得由本地 MySQL 结果替代，也不得在未获相应授权时执行。
+阶段 1 的本地必要门禁已经完成，用户于 2026-07-22 明确审查通过，历史状态保持 `APPROVED`。推送后的 GitHub Actions 已真实运行并为 `FAILED`，现作为阶段 1 的开放纠正项；在阶段 2 切换为 `IN_PROGRESS` 前，必须修复 Windows vcpkg baseline 获取与 Linux `httplib` CMake 发现路径，并由新的 GitHub Actions 运行证明 Ubuntu/GCC、Ubuntu/Clang、Windows/MSVC 三项均完整通过配置、构建和 CTest。生产数据库迁移与发布安全扫描仍为 `NOT_RUN`，不得由本地或远程构建结果替代，也不得在未获相应授权时执行。

@@ -62,7 +62,14 @@ src/main.cpp
 
 ## 构建与依赖
 
-Windows vcpkg manifest 依赖为 `cpp-httplib`、`libmysql`、`libsodium`、`nlohmann-json` 和 `openssl`。Linux 通过 pkg-config/CMake 查找对应开发包。OpenSSL 3 已作为后续安全模块基础链接，但阶段 1 尚未实现 TOTP。
+Windows vcpkg manifest 依赖为 `cpp-httplib`、`libmysql`、`libsodium`、`nlohmann-json` 和 `openssl`。Linux 的目标是通过系统开发包与 pkg-config/CMake 提供相同依赖，但 Ubuntu 24.04 当前会因 `libcpp-httplib-dev` 不提供 `httplibConfig.cmake` 而在配置阶段失败；修复并通过 CI 前不得将该路径描述为可用。OpenSSL 3 已作为后续安全模块基础链接，但阶段 1 尚未实现 TOTP。
+
+### 跨平台依赖解析约束
+
+- `vcpkg.json` 的 `builtin-baseline` 是版本事实。执行 manifest 安装的 vcpkg 仓库必须包含该提交及其 `versions/baseline.json`；禁止使用缺少该历史的浅克隆。可使用完整克隆，或显式获取固定基线后以 `git cat-file -e <baseline>:versions/baseline.json` 预检。
+- 安装系统包不等于 CMake 已能发现依赖。每条依赖获取路径都必须配套验证 CMake 发现方式，并最终暴露相同的 imported target；config package、pkg-config 或头文件/库回退逻辑只能位于 CMake 依赖适配层，不得进入领域层或应用层。
+- Linux 的 `cpp-httplib` 解析应先尝试 config package；不可用时，仅可对 Ubuntu 系统包使用已验证的 pkg-config 或 `find_path`/`find_library` 回退，并统一为 `httplib::httplib` 或项目自有的等价稳定 target。不得硬编码 CI runner 的绝对路径。
+- 每个 CI 矩阵项只有依赖预检、CMake 配置、构建和 CTest 全部完成后才可记为 `PASSED`。前置步骤失败时，后续跳过项保持未验证，不得折算为成功。
 
 Windows（MSVC 开发者终端）：
 
@@ -74,7 +81,7 @@ cmake --build build --config Debug
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-Linux：
+Linux（当前失败路径，仅用于复现；修复前不是受支持的构建命令）：
 
 ```bash
 sudo apt-get install libcpp-httplib-dev libmysqlclient-dev libsodium-dev \
@@ -97,7 +104,9 @@ Release 测试目标显式取消 `NDEBUG`，避免基于 `assert` 的测试在 C
 - 迁移发现、单语句约束、校验和、版本/步骤状态、命名锁和失败停止。
 - 真实回环 HTTP 上的四个遗留路由、严格 JSON、状态码、精确 CORS 和静态路径防穿越。
 
-GitHub Actions 工作流配置为 Ubuntu/GCC、Ubuntu/Clang 和 Windows/MSVC 的 Release 构建与 CTest。工作流配置存在不表示当前工作区已经实际运行 CI；阶段报告必须单独记录真实 CI 状态。
+GitHub Actions 工作流配置为 Ubuntu/GCC、Ubuntu/Clang 和 Windows/MSVC 的 Release 构建与 CTest。每次运行结果必须单独记录；工作流存在、本地通过或历史运行都不能代替当前提交的真实 CI 状态。
+
+提交 `1c92dea` 的 GitHub Actions 运行 `29909826819` 已真实执行并失败：Ubuntu GCC 和 Clang 都因 CMake 找不到 `httplib` config package 而停在配置阶段；Windows 因浅克隆 vcpkg 不包含 `vcpkg.json` 固定的历史 baseline 而停在 manifest 依赖安装阶段。三个任务均未进入构建或 CTest。修复必须由新的远程运行验证，不能以工作流或本地文件修改代替成功结果。
 
 第 14 项 `mysql_integration_test` 使用真实 MySQL 8 验证绑定、并发可见性所体现的事务隔离、连接重建、迁移重入、旧数据保留和长二进制。它只在显式提供 `WAREHOUSE_TEST_DB_*`、数据库名包含 `test` 且 `WAREHOUSE_TEST_DB_ALLOW_SCHEMA_CHANGES=YES` 时改动专用测试库；否则以 CTest skip 码 77 安全跳过。本阶段已在专用本地测试库上分别以 Debug 和 Release 运行通过。本地没有专用测试库凭据时仍必须标为 `BLOCKED` 或 `NOT_RUN`，不得用 fake executor 单元测试替代。
 

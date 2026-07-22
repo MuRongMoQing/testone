@@ -39,14 +39,30 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libcpp-httplib-dev libmysqlclient-dev libsodium-dev libssl-dev nlohmann-json3-dev pkg-config
+          pkg-config --exists cpp-httplib
+          pkg-config --modversion cpp-httplib
 
       # ── Windows ──
       - name: Setup vcpkg
         if: runner.os == 'Windows'
         shell: cmd
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git "%RUNNER_TEMP%\vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git "%RUNNER_TEMP%\vcpkg"
           call "%RUNNER_TEMP%\vcpkg\bootstrap-vcpkg.bat" -disableMetrics
+
+      - name: Verify vcpkg builtin baseline
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $manifest = Get-Content "${{ github.workspace }}/vcpkg.json" -Raw | ConvertFrom-Json
+          $baseline = $manifest.'builtin-baseline'
+          if (-not $baseline) {
+            throw 'vcpkg.json does not define builtin-baseline'
+          }
+          git -C "$env:RUNNER_TEMP\vcpkg" cat-file -e "${baseline}:versions/baseline.json"
+          if ($LASTEXITCODE -ne 0) {
+            throw "vcpkg clone does not contain builtin baseline $baseline"
+          }
 
       - name: Install manifest dependencies
         if: runner.os == 'Windows'
@@ -65,6 +81,7 @@ jobs:
           -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
           -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
           -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON
           ${{ steps.toolchain.outputs.args }}
           -S ${{ github.workspace }}
 
