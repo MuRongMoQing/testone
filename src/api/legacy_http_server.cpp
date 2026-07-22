@@ -6,11 +6,17 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <condition_variable>
+#include <deque>
 #include <fstream>
+#include <functional>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <system_error>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace warehouse::api {
 namespace {
@@ -18,6 +24,84 @@ namespace {
 using application::legacy::GoodsView;
 using application::legacy::LegacyApplicationErrorCode;
 using nlohmann::json;
+
+#ifndef CPPHTTPLIB_VERSION_NUM
+class LegacyBoundedTaskQueue final : public httplib::TaskQueue {
+public:
+    LegacyBoundedTaskQueue(std::size_t workerCount, std::size_t queueLimit)
+        : queueLimit_(queueLimit) {
+        workers_.reserve(workerCount);
+        for (std::size_t index = 0; index < workerCount; ++index) {
+            workers_.emplace_back([this] { runWorker(); });
+        }
+    }
+
+    ~LegacyBoundedTaskQueue() override { shutdown(); }
+
+    void enqueue(std::function<void()> task) override {
+        std::unique_lock<std::mutex> lock(mutex_);
+        spaceAvailable_.wait(lock, [this] {
+            return shuttingDown_ || tasks_.size() < queueLimit_;
+        });
+        if (shuttingDown_) return;
+        tasks_.push_back(std::move(task));
+        taskAvailable_.notify_one();
+    }
+
+    void shutdown() override {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (shuttingDown_) return;
+            shuttingDown_ = true;
+        }
+        taskAvailable_.notify_all();
+        spaceAvailable_.notify_all();
+        for (auto& worker : workers_) {
+            if (worker.joinable()) worker.join();
+        }
+    }
+
+private:
+    void runWorker() {
+        for (;;) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                taskAvailable_.wait(lock, [this] {
+                    return shuttingDown_ || !tasks_.empty();
+                });
+                if (tasks_.empty()) {
+                    if (shuttingDown_) return;
+                    continue;
+                }
+                task = std::move(tasks_.front());
+                tasks_.pop_front();
+                spaceAvailable_.notify_one();
+            }
+            task();
+        }
+    }
+
+    const std::size_t queueLimit_;
+    std::mutex mutex_;
+    std::condition_variable taskAvailable_;
+    std::condition_variable spaceAvailable_;
+    std::deque<std::function<void()>> tasks_;
+    std::vector<std::thread> workers_;
+    bool shuttingDown_{false};
+};
+#endif
+
+bool attachmentExceedsLimit(const httplib::Request& request, std::size_t limit) {
+#ifdef CPPHTTPLIB_VERSION_NUM
+    const auto& files = request.form.files;
+#else
+    const auto& files = request.files;
+#endif
+    return std::any_of(files.begin(), files.end(), [limit](const auto& entry) {
+        return entry.second.content.size() > limit;
+    });
+}
 
 void setJson(httplib::Response& response, int status, const json& value) {
     response.status = status;
@@ -167,7 +251,11 @@ private:
         const auto workers = options_.workerThreads;
         const auto queueLimit = options_.maxQueuedRequests;
         server_.new_task_queue = [workers, queueLimit] {
-            return new httplib::ThreadPool(workers, queueLimit);
+#ifdef CPPHTTPLIB_VERSION_NUM
+            return new httplib::ThreadPool(workers, 0, queueLimit);
+#else
+            return new LegacyBoundedTaskQueue(workers, queueLimit);
+#endif
         };
         server_.set_payload_max_length(options_.maxPayloadBytes);
         server_.set_read_timeout(std::max(0, options_.readTimeoutSeconds), 0);
@@ -184,11 +272,9 @@ private:
                 return httplib::Server::HandlerResponse::Handled;
             }
             if (request.is_multipart_form_data()) {
-                for (const auto& entry : request.form.files) {
-                    if (entry.second.content.size() > options_.maxAttachmentBytes) {
-                        setError(response, 413, "附件过大");
-                        return httplib::Server::HandlerResponse::Handled;
-                    }
+                if (attachmentExceedsLimit(request, options_.maxAttachmentBytes)) {
+                    setError(response, 413, "附件过大");
+                    return httplib::Server::HandlerResponse::Handled;
                 }
             }
             return httplib::Server::HandlerResponse::Unhandled;
