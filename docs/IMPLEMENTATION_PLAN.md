@@ -313,14 +313,17 @@
 | ADR 连续/重复编号 | `PASSED` | 0 | ADR 40 个，0001–0040 缺失 0、重复 0 |
 | 当前/目标误述与编译路径遗留构造 | `PASSED` | 0 | 已知过时现状表述 0；编译路径中的物理删除、手写 Socket/escape SQL 等命中 0 |
 | 补丁与构建残留 | `PASSED` | 0 | `.patch`/`.diff` 文件 0，空 hunk 风险 0；根目录 `.obj` 与写入探针已清理 |
+| 修复后 Release 重编与 CTest | `PASSED` | 0 | Windows/MSVC 重编 HTTP 适配器并链接；13 项执行通过，未提供专用数据库的 `mysql_integration_test` 为 `SKIPPED` |
+| cpp-httplib 0.14.3 兼容编译 | `PASSED` | 0 | 使用上游 0.14.3 头文件直接编译 `legacy_http_server.cpp`，旧版有界队列及 multipart 分支通过 |
+| GitHub Actions `29913791197` | `PASSED` | 0 | 提交 `37f51d6` 的 Ubuntu/GCC、Ubuntu/Clang、Windows/MSVC 均完成依赖预检、配置、构建与 CTest |
 
-### 失败与未运行项
+### 最终远程结果与未运行项
 
 | 验证 | 状态 | 原因与边界 |
 |---|---|---|
-| GitHub Actions | `FAILED` | 推送提交 `1c92dea` 后运行 `29909826819`；三个矩阵项均在构建前失败 |
-| Linux GCC/Clang | `FAILED` | Ubuntu 24.04 已安装 `libcpp-httplib-dev`，但该包不提供当前要求的 config package；CMake 配置退出 1，构建和 CTest 均未运行 |
-| Windows/MSVC | `FAILED` | 工作流以 `--depth 1` 克隆 vcpkg，仓库不包含 manifest 固定的 `4e82e29f14eac2b3422f18f72c7524d04f19924e` baseline；依赖安装失败，配置、构建和 CTest 均未运行 |
+| GitHub Actions | `PASSED` | 提交 `37f51d6` 的运行 `29913791197` 三个矩阵项全部成功 |
+| Linux GCC/Clang | `PASSED` | Ubuntu 24.04 通过 `cpp-httplib.pc` 配置；GCC 与 Clang 均完成构建和 CTest，13 项执行通过、真实 MySQL 项 `SKIPPED` |
+| Windows/MSVC | `PASSED` | 完整 vcpkg 历史包含固定 baseline；预检、manifest 安装、配置、构建和 CTest 全部成功，13 项执行通过、真实 MySQL 项 `SKIPPED` |
 | 生产数据库迁移/对账 | `NOT_RUN` | 未获生产授权；阶段 1 测试入口明确拒绝未标识为测试库的目标 |
 | 依赖、二进制和打包安全扫描 | `NOT_RUN` | 属于阶段 10 发布门；未把未扫描产物描述为可发布 |
 | `/api/v1`、Vue、ClamAV、汇率和外部账册 | `NOT_RUN` | 属于后续阶段，不是阶段 1 验收内容 |
@@ -337,8 +340,11 @@
 - 独立规范/标准复审发现并已修复：Release 断言失效、运行时拼接控制表 DDL、失败状态写入未检查、迁移版本/步骤矛盾、清单篡改/删除逃逸、基线与控制表约束验证不足、列表排序变化、长二进制未走 long-data、监听失败可能虚报、测试路径和文档事实不一致。复审结论本身未替代主 agent 的构建与测试。
 - 推送提交 `1c92dea` 后，GitHub Actions 运行 `29909826819` 的三个矩阵项真实失败：Ubuntu/GCC 与 Ubuntu/Clang 的依赖安装成功，但 CMake 找不到 `httplib` config package；Windows/MSVC 的浅克隆 vcpkg 不含固定 baseline 的 `versions/baseline.json`。Node 运行时弃用警告不是失败原因。
 - Windows 的同一 baseline/浅克隆错误已存在于阶段 0 运行 `29674119655`，属于既有工作流缺陷；Linux 错误由阶段 1 新依赖路径暴露。两类失败都发生在构建前，因此没有任何远程跨平台编译或 CTest 结果。
+- 第一次修复提交 `6d7cb2b` 的运行 `29912614590` 中，Linux 已通过 pkg-config 配置，但 Ubuntu cpp-httplib 0.14.3 不支持新版 `ThreadPool` 和 `request.form` API，GCC/Clang 构建失败；Windows 完整通过。第二次修复保留有界队列与附件上限，并兼容两套 API 后，运行 `29913791197` 三项成功。
+- 一次全新本地构建目录验证因 Visual Studio 内置 vcpkg 不含 registry/ports 且受限环境无法补取，同时未自动找到 Ninja 而失败；未将其计为通过。已有受控 Release 构建目录随后真实重编并通过 CTest。
+- 首次 0.14.3 编译探针因沙盒拒绝创建 `C:\tmp` 子目录且编译器环境未继承而没有执行；改用工作区 `out` 临时目录和同一 `cmd` 开发者环境后，实际编译退出 0。Windows 重编期间 vcpkg applocal 脚本报告找不到对象检查工具，但 Ninja、链接与 CTest 退出 0；该告警不等于发布安全扫描通过。
 - 文档收口时 `apply_patch` 持续因 Windows 沙箱刷新错误不可用，主 agent 改用 UTF-8 临时补丁和 `git apply --whitespace=error`；临时补丁已删除，最终仍以 `git diff --check` 和补丁残留检查为准。
 
 ### 审查门
 
-阶段 1 的本地必要门禁已经完成，用户于 2026-07-22 明确审查通过，历史状态保持 `APPROVED`。推送后的 GitHub Actions 已真实运行并为 `FAILED`，现作为阶段 1 的开放纠正项；在阶段 2 切换为 `IN_PROGRESS` 前，必须修复 Windows vcpkg baseline 获取与 Linux `httplib` CMake 发现路径，并由新的 GitHub Actions 运行证明 Ubuntu/GCC、Ubuntu/Clang、Windows/MSVC 三项均完整通过配置、构建和 CTest。生产数据库迁移与发布安全扫描仍为 `NOT_RUN`，不得由本地或远程构建结果替代，也不得在未获相应授权时执行。
+阶段 1 的本地必要门禁已经完成，用户于 2026-07-22 明确审查通过，历史状态保持 `APPROVED`。阶段 1 的跨平台 CI 纠正项已由提交 `37f51d6` 和运行 `29913791197` 关闭：Ubuntu/GCC、Ubuntu/Clang、Windows/MSVC 均完整通过配置、构建和 CTest。CI 未配置专用 MySQL 测试库，因此三项中的 `mysql_integration_test` 均为 `SKIPPED`；阶段 1 原有本地专用 MySQL 真实通过记录仍独立有效。阶段 2 仍须用户明确批准后才能切换为 `IN_PROGRESS`；生产数据库迁移与发布安全扫描保持 `NOT_RUN`，不得由上述结果替代。
